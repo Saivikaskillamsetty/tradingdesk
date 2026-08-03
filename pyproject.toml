@@ -1,0 +1,33 @@
+[project]
+name = "desk-mcp"
+version = "0.1.0"
+description = "MCP server backing a multi-agent equity research desk"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.2.0",
+    "httpx>=0.27",
+    "pandas>=2.2",
+    "numpy>=1.26",
+]
+
+[project.scripts]
+desk-mcp = "desk_mcp.server:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["desk_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "network: test hits live external APIs (SEC EDGAR)",
+]

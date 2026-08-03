@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "desk": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/Users/saivikaskillamsetty/Projects/tradingdesk",
+        "run",
+        "desk-mcp"
+      ],
+      "env": {
+        "SEC_USER_AGENT": "TradingDesk Research saivikas34@gmail.com"
+      }
+    },
+    "alpaca": {
+      "command": "uvx",
+      "args": ["alpaca-mcp-server"],
+      "env": {
+        "ALPACA_API_KEY": "${ALPACA_API_KEY}",
+        "ALPACA_SECRET_KEY": "${ALPACA_SECRET_KEY}",
+        "ALPACA_PAPER_TRADE": "true"
+      }
+    }
+  }
+}
