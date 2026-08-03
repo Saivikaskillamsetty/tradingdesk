@@ -11,10 +11,11 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from desk_mcp import metrics
+from desk_mcp import metrics, technicals
 from desk_mcp.edgar import facts, filings
 from desk_mcp.edgar.client import EdgarError
 from desk_mcp.edgar.concepts import ALL_KEYS
+from desk_mcp.prices.source import PriceError
 
 mcp = MCPServer(
     name="desk",
@@ -106,6 +107,35 @@ def get_metrics(ticker: str, history_years: int = 5) -> dict[str, Any]:
     try:
         return metrics.analyse(ticker, history_years=history_years)
     except (EdgarError, ValueError, KeyError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_technicals(
+    ticker: str, benchmark: str = "SPY", lookback_days: int = 500
+) -> dict[str, Any]:
+    """Technical picture for a symbol: trend, momentum, volatility, key levels.
+
+    Computed from daily bars on the consolidated SIP tape, so volume is the
+    full market rather than a single venue. Returns moving-average structure,
+    RSI, ATR (with stop-distance guidance), relative strength versus a
+    benchmark, drawdown from the one-year high, and clustered support and
+    resistance annotated with what each level does at the current price.
+
+    Anything that could not be computed from the available history is null and
+    explained under `limitations` rather than approximated.
+
+    Args:
+        ticker: Stock symbol, e.g. "NVDA".
+        benchmark: Symbol for relative strength, default "SPY".
+        lookback_days: Calendar days of history to pull. 500 gives a 200-day
+            moving average enough trading sessions.
+    """
+    try:
+        return technicals.analyse(
+            ticker, benchmark=benchmark, lookback_days=lookback_days
+        )
+    except (PriceError, ValueError) as exc:
         return _error(exc)
 
 
