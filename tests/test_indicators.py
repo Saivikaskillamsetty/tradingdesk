@@ -149,14 +149,24 @@ class TestSwingLevels:
         assert resistance[0].price == pytest.approx(110, abs=1)
         assert resistance[0].touches >= 2
 
-    def test_single_touch_is_not_a_level(self):
-        highs = [100] * 20
-        highs[10] = 150
-        lows = [100] * 20
+    def test_single_touch_survives_only_while_recent(self):
+        """Within a short history every pivot is recent, so it counts.
+
+        Supersedes an earlier rule that dropped all single-touch pivots
+        outright. That rule erased every level on a trending stock; recency
+        is what distinguishes a usable untested level from a stale one, and
+        `test_stale_single_touch_pivots_are_still_dropped` covers the far side.
+        """
+        highs = [100.0] * 20
+        highs[10] = 150.0
+        lows = [100.0] * 20
         dates = [f"2026-01-{i + 1:02d}" for i in range(20)]
 
         levels = ind.swing_levels(highs, lows, dates)
-        assert not [l for l in levels if l.price > 140]
+        spike = [l for l in levels if l.price > 140]
+
+        assert spike, "a pivot inside a 20-bar history is recent by definition"
+        assert spike[0].touches == 1, "and must be flagged as untested"
 
     def test_flat_series_produces_no_levels(self):
         """A plateau is not a pivot.
@@ -227,6 +237,63 @@ class TestSwingLevels:
 
         levels = ind.swing_levels(highs, [100.0] * 40, dates)
         assert all(l.acts_as is None for l in levels)
+
+    def test_trending_stock_still_yields_recent_levels(self):
+        """A two-touch rule everywhere erases all structure in a trend.
+
+        Each swing low in an uptrend prints at a new price, so nothing
+        clusters and every recent level is filtered out -- leaving only the
+        congestion zone the stock left long ago. On a real name that ran
+        108 -> 488 this put "nearest support" 45% below spot.
+        """
+        highs, lows, dates = [], [], []
+        for i in range(200):
+            base = 100.0 + i * 2  # persistent uptrend, no revisited prices
+            swing_low = i % 20 == 10
+            swing_high = i % 20 == 0
+            highs.append(base + (8 if swing_high else 2))
+            lows.append(base - (8 if swing_low else 2))
+            dates.append(f"2026-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}")
+
+        price = lows[-1] + 4
+        levels = ind.swing_levels(highs, lows, dates, current_price=price)
+        support = [l for l in levels if l.acts_as == "support"]
+
+        assert support, "a trending stock must still produce support levels"
+
+        nearest = max(support, key=lambda l: l.price)
+        assert nearest.distance_pct > -25, (
+            f"nearest support {nearest.distance_pct:.1f}% away is unusable "
+            f"for stop placement"
+        )
+
+    def test_untested_recent_pivot_is_marked_single_touch(self):
+        """touches=1 is the caller's signal that a level is untested."""
+        highs, lows, dates = [], [], []
+        for i in range(120):
+            base = 100.0 + i
+            highs.append(base + (6 if i % 20 == 0 else 1))
+            lows.append(base - (6 if i % 20 == 10 else 1))
+            dates.append(f"2026-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}")
+
+        levels = ind.swing_levels(highs, lows, dates)
+        assert any(l.touches == 1 for l in levels)
+
+    def test_stale_single_touch_pivots_are_still_dropped(self):
+        """Recency is what earns an untested pivot its place, not novelty."""
+        highs, lows, dates = [], [], []
+        for i in range(200):
+            # One isolated spike very early, then a long flat stretch.
+            spike = i == 5
+            highs.append(300.0 if spike else 100.0)
+            lows.append(50.0 if spike else 100.0)
+            dates.append(f"2026-{(i // 28) + 1:02d}-{(i % 28) + 1:02d}")
+
+        levels = ind.swing_levels(highs, lows, dates, recent_bars=60)
+
+        assert not [l for l in levels if l.price > 250], (
+            "a single touch from 200 bars ago should not survive"
+        )
 
     def test_short_series_yields_nothing(self):
         assert ind.swing_levels([1, 2], [1, 2], ["a", "b"]) == []

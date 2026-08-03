@@ -176,13 +176,25 @@ def swing_levels(
     lookback: int = 3,
     tolerance_pct: float = 1.5,
     current_price: float | None = None,
+    recent_bars: int = 60,
 ) -> list[Level]:
     """Support and resistance from clustered swing pivots.
 
     A pivot is a bar whose high exceeds (or low undercuts) the `lookback` bars
-    either side. Pivots within `tolerance_pct` of each other are one level;
-    the count of touches is what makes a level worth respecting, so levels
-    touched once are dropped.
+    either side. Pivots within `tolerance_pct` of each other form one level,
+    and repeated touches are what make a level worth respecting.
+
+    Requiring two touches everywhere sounds right and is badly wrong for
+    trending stocks. In a strong trend each successive swing low prints at a
+    different price, so nothing clusters and every recent level is discarded --
+    leaving only the stale congestion zone the stock left months ago. On a name
+    that ran from 108 to 488, that put the "nearest support" 45% below spot,
+    which is useless for placing a stop.
+
+    So a pivot inside the last `recent_bars` survives on a single touch. It is
+    reported with `touches=1`, which is the caller's signal that the level is
+    untested -- a recent swing low is the standard stop reference whether or
+    not price has returned to it. Older pivots still need corroboration.
     """
     if not (len(highs) == len(lows) == len(dates)):
         raise ValueError("highs, lows and dates must be the same length")
@@ -207,6 +219,9 @@ def swing_levels(
         if lows[i] <= min(low_window) and lows[i] < max(low_window):
             pivots.append((lows[i], "support", dates[i]))
 
+    # Pivots at or after this date count even when untested.
+    recent_cutoff = dates[-recent_bars] if len(dates) > recent_bars else dates[0]
+
     levels: list[Level] = []
     for kind in ("support", "resistance"):
         candidates = sorted(
@@ -215,8 +230,12 @@ def swing_levels(
         cluster: list[tuple[float, str, str]] = []
 
         def flush(group: list[tuple[float, str, str]]) -> None:
-            if len(group) < 2:
-                return  # a single touch is not a level
+            if not group:
+                return
+            # An untested pivot only counts if it is recent enough to still
+            # describe where price is trading.
+            if len(group) < 2 and max(g[2] for g in group) < recent_cutoff:
+                return
             prices = [g[0] for g in group]
             levels.append(
                 Level(
