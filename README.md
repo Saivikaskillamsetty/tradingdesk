@@ -50,12 +50,26 @@ uv sync
 uv run pytest tests/golden -q     # must be green before any agent work
 ```
 
-Alpaca paper trading (free) needs keys exported before launching Claude Code —
-`.mcp.json` reads them from the environment so no secret enters the repo:
+### Credentials
+
+Keys live in the environment, never in the repo — `.mcp.json` reads them via
+`${VAR}` expansion. Put them in `~/.zshrc` so they cannot be committed by
+accident.
+
+| Variable | Where to get it | Needed by |
+|---|---|---|
+| `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | [app.alpaca.markets](https://app.alpaca.markets/signup) — switch the dashboard to **Paper**, then API Keys → Generate. Secret shows once. | Phase 1 (`chartist`) |
+| `FRED_API_KEY` | [fredaccount.stlouisfed.org/apikeys](https://fredaccount.stlouisfed.org/apikeys) — instant, free | Phase 3 (`macro`) |
+| `SEC_USER_AGENT` | Your own `name email` | optional; defaults in `.mcp.json` |
+
+Paper trading needs no funding, identity check or approval — that applies only
+to live accounts.
+
+Verify without exposing anything (the script prints presence and a masked
+prefix only, never a secret):
 
 ```bash
-export ALPACA_API_KEY=...
-export ALPACA_SECRET_KEY=...
+uv run python scripts/check_keys.py
 ```
 
 ## Data sources
