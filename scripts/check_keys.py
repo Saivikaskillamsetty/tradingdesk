@@ -118,9 +118,11 @@ def check_alpaca() -> bool:
 def check_fred() -> bool:
     key = os.environ.get("FRED_API_KEY", "")
 
-    print("\nFRED (macro data — needed at Phase 3)")
+    print("\nFRED (macro data — used by the `macro` agent)")
     if not key:
-        print(f"[{WARN}] FRED_API_KEY not set (fine for now)")
+        print(f"[{WARN}] FRED_API_KEY not set — the `macro` agent cannot run")
+        print("         Free key: https://fredaccount.stlouisfed.org/apikeys")
+        print("         Every other agent works without it.")
         return True
 
     print(f"[{OK}] FRED_API_KEY       {mask(key)}")
