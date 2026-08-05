@@ -8,12 +8,18 @@ silently misses on all of them.
 
 from __future__ import annotations
 
+import os
 from datetime import date
 
 import pytest
 
 from desk_mcp import macro
 from desk_mcp.macro import MacroError
+
+needs_fred_key = pytest.mark.skipif(
+    not os.environ.get("FRED_API_KEY", "").strip(),
+    reason="FRED_API_KEY not set — macro is the desk's one optional credential",
+)
 
 
 def points(*pairs: tuple[str, float]) -> list[dict]:
@@ -126,8 +132,13 @@ class TestSnapshotResilience:
 
 
 @pytest.mark.network
+@needs_fred_key
 class TestAgainstLiveFred:
-    """Requires FRED_API_KEY. Skipped by the default offline run."""
+    """Requires FRED_API_KEY.
+
+    Skipped rather than failed when the key is absent. A suite that goes red
+    for a known environmental reason teaches everyone to ignore red.
+    """
 
     def test_ten_year_yield_is_a_plausible_rate(self):
         reading = macro.series_reading("treasury_10y")
