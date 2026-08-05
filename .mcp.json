@@ -9,15 +9,18 @@
         "desk-mcp"
       ],
       "env": {
-        "SEC_USER_AGENT": "TradingDesk Research saivikas34@gmail.com"
+        "SEC_USER_AGENT": "TradingDesk Research saivikas34@gmail.com",
+        "ALPACA_API_KEY": "${ALPACA_API_KEY:-}",
+        "ALPACA_SECRET_KEY": "${ALPACA_SECRET_KEY:-}",
+        "FRED_API_KEY": "${FRED_API_KEY:-}"
       }
     },
     "alpaca": {
       "command": "uvx",
       "args": ["alpaca-mcp-server"],
       "env": {
-        "ALPACA_API_KEY": "${ALPACA_API_KEY}",
-        "ALPACA_SECRET_KEY": "${ALPACA_SECRET_KEY}",
+        "ALPACA_API_KEY": "${ALPACA_API_KEY:-}",
+        "ALPACA_SECRET_KEY": "${ALPACA_SECRET_KEY:-}",
         "ALPACA_PAPER_TRADE": "true"
       }
     }
