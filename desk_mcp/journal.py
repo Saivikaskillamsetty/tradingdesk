@@ -259,6 +259,27 @@ def close(
     return entry
 
 
+def attach_order(thesis_id: str, order: dict[str, Any]) -> dict[str, Any]:
+    """Record the broker order a thesis was executed as.
+
+    Written once. A thesis that already carries an order cannot be sent
+    again, which is what stops a retried tool call from opening a second
+    position in the same name.
+    """
+    entry = load(thesis_id)
+
+    if entry.get("execution"):
+        raise JournalError(
+            f"thesis {thesis_id} already has order "
+            f"{entry['execution'].get('broker_order_id')} attached; refusing to "
+            f"place a second order against the same call"
+        )
+
+    entry["execution"] = {**order, "attached_at": _now()}
+    _write_atomic(_path_for(thesis_id), entry)
+    return entry
+
+
 def open_risk() -> dict[str, Any]:
     """Capital currently at risk across open theses.
 

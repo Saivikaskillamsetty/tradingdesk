@@ -31,8 +31,9 @@ The whole design follows from preventing that.
 
 ## Status
 
-Phase 3 complete: research, sizing, a scoreable record, and the context around
-a name — filings text, macro conditions, candidate discovery.
+Phase 4 complete: research, sizing, a scoreable record, the context around a
+name, and paper execution that cannot be reached except through an approved
+thesis.
 
 - [x] EDGAR client — rate limited, disk cached, no API key required
 - [x] Concept resolver with provenance and staleness enforcement
@@ -41,7 +42,7 @@ a name — filings text, macro conditions, candidate discovery.
 - [x] Phase 1 — `fundamentals` + `chartist` agents, `/analyze`
 - [x] Phase 2 — `risk` (veto) + journal, `/journal`
 - [x] Phase 3 — `filings`, `macro`, `screener`
-- [ ] Phase 4 — Alpaca paper execution behind risk approval
+- [x] Phase 4 — `pilot`, Alpaca paper execution behind risk approval
 - [ ] Phase 5 — `/postmortem` calibration loop
 
 ## Setup
@@ -107,6 +108,11 @@ for fundamentals because it is the source of record rather than a scrape of it.
 | `journal_thesis` | Records a call with its evidence and falsifiers |
 | `list_theses` / `get_thesis` | The book, open or closed |
 | `close_thesis` | Resolves a call and computes realised R |
+| `get_account` | Paper account equity, cash, buying power |
+| `place_order` | Sends an approved thesis to the paper broker |
+| `get_broker_positions` / `get_broker_orders` | Broker state |
+| `cancel_order` / `close_broker_position` | Unwind |
+| `reconcile_positions` | Broker positions against journalled theses |
 
 ## Risk limits
 
@@ -138,6 +144,35 @@ entry and stop, so outcomes compare across positions of different sizes.
 
 Set `DESK_THESES_DIR` to keep the book somewhere other than the repository.
 
+## Execution
+
+Paper only. The base URL is the paper endpoint, hardcoded with no environment
+variable that redirects it, and the account number is checked for Alpaca's
+`PA` prefix before any order is sent — live keys against the paper URL fail
+closed rather than trading.
+
+The gate is the shape of the function rather than an instruction to an agent:
+
+```
+place_order(thesis_id)      # and nothing else
+```
+
+There is no symbol parameter, no quantity, no price. All of it is read back
+out of the journal entry, which exists only because the risk officer approved
+it and only carries a share count the risk officer computed. An agent asked to
+buy 100 shares of something has no way to express that.
+
+An order is refused when the thesis is closed, is a watch call, carries a
+vetoed verdict, was sized at zero shares, lacks an entry or stop, or already
+has an order attached — the last of which is what stops a retried call from
+opening a second position in the same name.
+
+Orders go out as brackets, so the stop the risk officer sized against is
+submitted with the entry rather than left to a later call that might never
+happen. `reconcile_positions` compares what the broker holds against what the
+journal knows about, which is the only way to see the untracked exposure that
+portfolio heat is blind to.
+
 ## Known limitations
 
 - **Q4 quarterly gaps.** Q4 gets no standalone 10-Q; it must be derived as
@@ -160,6 +195,9 @@ Set `DESK_THESES_DIR` to keep the book somewhere other than the repository.
 - **Macro needs its own key.** Without `FRED_API_KEY` the macro tools fail
   with a message saying where to get one. Nothing else on the desk depends
   on them.
+- **A submitted order is not a filled one.** A limit entry may never fill,
+  and the position does not exist until it does. The `pilot` agent is
+  instructed never to describe one as the other.
 - **Portfolio heat only sees the journal.** A position taken without recording
   it is invisible to the risk checks, so the heat number is exposure as
   recorded rather than exposure as held. `size_position` says so in its

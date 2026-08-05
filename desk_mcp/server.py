@@ -11,10 +11,11 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from desk_mcp import journal, macro, metrics, risk, screener, technicals
+from desk_mcp import execution, journal, macro, metrics, risk, screener, technicals
 from desk_mcp.edgar import documents, facts, filings
 from desk_mcp.edgar.client import EdgarError
 from desk_mcp.edgar.concepts import ALL_KEYS
+from desk_mcp.execution import ExecutionError
 from desk_mcp.journal import JournalError
 from desk_mcp.macro import MacroError
 from desk_mcp.prices.source import PriceError
@@ -525,6 +526,114 @@ def close_thesis(
             thesis_id, outcome=outcome, exit_price=exit_price, note=note
         )
     except (JournalError, OSError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_account() -> dict[str, Any]:
+    """Paper account state: equity, cash, buying power, positions value.
+
+    Refuses to return anything for an account it cannot prove is a paper
+    account. Use the `equity` here as the input to `size_position` rather than
+    assuming a figure.
+    """
+    try:
+        return execution.account()
+    except (ExecutionError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def place_order(thesis_id: str) -> dict[str, Any]:
+    """Send a journalled, risk-approved thesis to the paper broker.
+
+    Takes a thesis id and nothing else, by design. Symbol, share count, entry,
+    stop and target all come from the journal entry, which exists only because
+    the risk officer approved it. There is no way to place an order this desk
+    did not size.
+
+    Refuses when: the thesis is closed, is a watch call, carries a vetoed risk
+    verdict, was sized at zero shares, lacks an entry or stop, or already has
+    an order attached. Orders go out as brackets, so the stop is submitted with
+    the entry rather than left to a later call.
+
+    A submitted order is not a filled one. Check `get_broker_orders`.
+
+    Args:
+        thesis_id: Identifier returned by `journal_thesis`.
+    """
+    try:
+        return execution.place_order(thesis_id)
+    except (ExecutionError, JournalError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_broker_positions() -> dict[str, Any]:
+    """Open positions at the paper broker, with unrealised P&L."""
+    try:
+        return execution.positions()
+    except (ExecutionError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_broker_orders(status: str = "open", limit: int = 50) -> dict[str, Any]:
+    """Orders at the paper broker, newest first.
+
+    Args:
+        status: "open", "closed" or "all".
+        limit: Maximum orders to return.
+    """
+    try:
+        return execution.orders(status=status, limit=limit)
+    except (ExecutionError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def cancel_order(broker_order_id: str) -> dict[str, Any]:
+    """Cancel a working order.
+
+    Does not close a filled position — if the entry already filled, the
+    position remains open and must be closed explicitly.
+
+    Args:
+        broker_order_id: Order id returned by `place_order`.
+    """
+    try:
+        return execution.cancel_order(broker_order_id)
+    except (ExecutionError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def close_broker_position(symbol: str) -> dict[str, Any]:
+    """Close an open position at market.
+
+    Closing at the broker does not close the thesis. Follow this with
+    `close_thesis` and the fill price so realised R is recorded.
+
+    Args:
+        symbol: Stock symbol of the position to close.
+    """
+    try:
+        return execution.close_position(symbol)
+    except (ExecutionError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def reconcile_positions() -> dict[str, Any]:
+    """Compare broker positions against open journalled theses.
+
+    Portfolio heat is computed from the journal, so a position held without a
+    thesis is exposure the risk checks cannot see. This reports both kinds of
+    mismatch: untracked positions, and theses whose entry never filled.
+    """
+    try:
+        return execution.reconcile()
+    except (ExecutionError, JournalError, PriceError) as exc:
         return _error(exc)
 
 
