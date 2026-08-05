@@ -7,14 +7,14 @@ rate limiter here is deliberately conservative.
 
 from __future__ import annotations
 
-import json
 import os
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 import httpx
+
+from desk_mcp import cache
 
 SEC_UA = os.environ.get(
     "SEC_USER_AGENT", "TradingDesk Research saivikas34@gmail.com"
@@ -26,10 +26,6 @@ SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 
 # SEC's published ceiling is 10/sec. We use 5/sec for headroom.
 _MIN_INTERVAL = 0.2
-
-CACHE_DIR = Path(
-    os.environ.get("DESK_CACHE_DIR", Path(__file__).resolve().parents[2] / ".cache")
-)
 
 # Company facts change only when a new filing lands; a day is a safe TTL.
 DEFAULT_TTL = 86_400
@@ -58,38 +54,8 @@ class _RateLimiter:
 _limiter = _RateLimiter(_MIN_INTERVAL)
 
 
-def _cache_path(key: str) -> Path:
-    return CACHE_DIR / f"{key}.json"
-
-
-def _read_cache(key: str, ttl: int) -> Any | None:
-    path = _cache_path(key)
-    if not path.exists():
-        return None
-    if ttl >= 0 and time.time() - path.stat().st_mtime > ttl:
-        return None
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        # A truncated cache file should never be fatal — just refetch.
-        return None
-
-
-def _write_cache(key: str, payload: Any) -> None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    path = _cache_path(key)
-    # Write via temp file so a crash mid-write can't leave corrupt JSON behind.
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload))
-    tmp.replace(path)
-
-
-def fetch_json(url: str, cache_key: str, ttl: int = DEFAULT_TTL) -> Any:
-    """GET a JSON document from SEC, using the on-disk cache when fresh."""
-    cached = _read_cache(cache_key, ttl)
-    if cached is not None:
-        return cached
-
+def _get(url: str) -> httpx.Response:
+    """Rate-limited GET against SEC, with their required identifying header."""
     _limiter.wait()
     try:
         response = httpx.get(
@@ -109,13 +75,39 @@ def fetch_json(url: str, cache_key: str, ttl: int = DEFAULT_TTL) -> Any:
     if response.status_code != 200:
         raise EdgarError(f"{url} returned HTTP {response.status_code}")
 
+    return response
+
+
+def fetch_json(url: str, cache_key: str, ttl: int = DEFAULT_TTL) -> Any:
+    """GET a JSON document from SEC, using the on-disk cache when fresh."""
+    cached = cache.read(cache_key, ttl)
+    if cached is not None:
+        return cached
+
+    response = _get(url)
     try:
         payload = response.json()
     except ValueError as exc:
         raise EdgarError(f"{url} returned non-JSON body") from exc
 
-    _write_cache(cache_key, payload)
+    cache.write(cache_key, payload)
     return payload
+
+
+def fetch_text(url: str, cache_key: str, ttl: int = -1) -> str:
+    """GET a filing document as text.
+
+    Filed documents never change, so the default ttl is negative -- cache
+    forever. Refetching one costs rate-limit budget that a research session
+    would rather spend on a document it has not read yet.
+    """
+    cached = cache.read(cache_key, ttl)
+    if cached is not None:
+        return cached
+
+    body = _get(url).text
+    cache.write(cache_key, body)
+    return body
 
 
 def resolve_cik(ticker: str) -> int:

@@ -11,13 +11,15 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from desk_mcp import journal, metrics, risk, technicals
-from desk_mcp.edgar import facts, filings
+from desk_mcp import journal, macro, metrics, risk, screener, technicals
+from desk_mcp.edgar import documents, facts, filings
 from desk_mcp.edgar.client import EdgarError
 from desk_mcp.edgar.concepts import ALL_KEYS
 from desk_mcp.journal import JournalError
+from desk_mcp.macro import MacroError
 from desk_mcp.prices.source import PriceError
 from desk_mcp.risk import RiskError
+from desk_mcp.screener import ScreenerError
 
 mcp = MCPServer(
     name="desk",
@@ -178,6 +180,169 @@ def get_insider_activity(ticker: str, limit: int = 25) -> dict[str, Any]:
     try:
         return filings.insider_activity(ticker, limit=limit)
     except EdgarError as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_filing_text(
+    ticker: str,
+    accession: str | None = None,
+    form: str | None = None,
+    offset: int = 0,
+    max_chars: int = 20_000,
+) -> dict[str, Any]:
+    """The text of a filing as filed, markup stripped, in windows.
+
+    Use this when the numbers raise a question they cannot answer — a margin
+    that moved, a quarter that beat and sold off anyway, a net income figure
+    that outran operating income. `get_filings` gives you the date; this gives
+    you what the company actually said.
+
+    Large filings are returned in windows. `truncated` and `next_offset` tell
+    you whether there is more; a silently cut filing reads like a complete one.
+    Prefer `search_filing_text` when you know what you are looking for.
+
+    Args:
+        ticker: Stock symbol.
+        accession: Specific filing accession number. Takes precedence.
+        form: Read the newest filing of this form instead, e.g. "10-Q".
+        offset: Character offset to start from, for paging.
+        max_chars: Characters to return, capped at 100,000.
+    """
+    try:
+        return documents.document_text(
+            ticker, accession=accession, form=form, offset=offset, max_chars=max_chars
+        )
+    except EdgarError as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def search_filing_text(
+    ticker: str,
+    query: str,
+    accession: str | None = None,
+    form: str | None = None,
+    context: int = 800,
+    max_hits: int = 5,
+) -> dict[str, Any]:
+    """Passages of a filing around every occurrence of a term, verbatim.
+
+    Far cheaper than paging a 10-K to find the one paragraph that explains a
+    tax benefit or a goodwill charge. No match means the term is absent from
+    this document, not that the fact is absent from the company's filings.
+
+    Args:
+        ticker: Stock symbol.
+        query: Term to find, e.g. "stock-based compensation".
+        accession: Specific filing accession number. Takes precedence.
+        form: Search the newest filing of this form instead, e.g. "10-K".
+        context: Characters of surrounding text per hit.
+        max_hits: Maximum passages to return.
+    """
+    try:
+        return documents.search_filing(
+            ticker,
+            query=query,
+            accession=accession,
+            form=form,
+            context=context,
+            max_hits=max_hits,
+        )
+    except EdgarError as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_macro_snapshot(series: list[str] | None = None) -> dict[str, Any]:
+    """Current macro conditions from FRED: rates, curve, inflation, jobs, vol.
+
+    Every reading carries its FRED series id, observation date and 1-, 3- and
+    12-month changes, computed against the last real print rather than a
+    calendar date. Series that fail are listed under `unavailable` rather than
+    taking the whole snapshot down.
+
+    Rates and inflation recalled from memory are wrong by whole percentage
+    points. Always read them here.
+
+    Args:
+        series: Optional subset, e.g. ["treasury_10y", "curve_10y_2y"]. Omit
+            for all of them.
+    """
+    try:
+        return macro.snapshot(keys=series)
+    except MacroError as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_macro_series(key: str) -> dict[str, Any]:
+    """One macro series in detail, with its 1-, 3- and 12-month changes.
+
+    Args:
+        key: Series key, e.g. "treasury_10y", "core_cpi", "vix". Call
+            `get_macro_snapshot` to see them all.
+    """
+    try:
+        return macro.series_reading(key)
+    except MacroError as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_market_movers(top: int = 10) -> dict[str, Any]:
+    """Today's largest percentage gainers and losers.
+
+    A starting list, not a signal — most large single-day moves are news the
+    market has already priced.
+
+    Args:
+        top: How many of each to return, capped at 50.
+    """
+    try:
+        return screener.movers(top=top)
+    except (ScreenerError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_most_active(by: str = "volume", top: int = 10) -> dict[str, Any]:
+    """The day's most heavily traded names.
+
+    Args:
+        by: "volume" or "trades".
+        top: How many to return, capped at 50.
+    """
+    try:
+        return screener.most_active(by=by, top=top)
+    except (ScreenerError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def rank_candidates(
+    symbols: list[str], benchmark: str = "SPY", lookback_days: int = 400
+) -> dict[str, Any]:
+    """Order a candidate list by relative strength, with supporting measures.
+
+    Turns a raw list into a shortlist worth spending the research agents on.
+    Returns trend structure, distance from the 50-day, RSI, ATR as a percentage
+    of price and drawdown from the one-year high for each name. Symbols whose
+    history could not be retrieved appear under `unavailable` rather than
+    quietly dropping out.
+
+    This orders candidates; it does not judge them.
+
+    Args:
+        symbols: Up to 40 symbols. Each costs a separate history request.
+        benchmark: Symbol for relative strength, default "SPY".
+        lookback_days: Calendar days of history per symbol.
+    """
+    try:
+        return screener.rank(
+            symbols, benchmark=benchmark, lookback_days=lookback_days
+        )
+    except (ScreenerError, PriceError) as exc:
         return _error(exc)
 
 

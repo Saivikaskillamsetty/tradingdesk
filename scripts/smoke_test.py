@@ -129,6 +129,88 @@ async def chartist_path(ticker: str) -> dict:
     return tech
 
 
+async def filings_path(ticker: str) -> None:
+    print("\n[filings agent tools]")
+
+    listed = await call("get_filings", {"ticker": ticker, "limit": 5})
+    newest = listed["filings"][0]
+    print(f"  get_filings         newest {newest['form']} {newest['filed']}")
+
+    text = await call(
+        "get_filing_text",
+        {"ticker": ticker, "accession": newest["accession"], "max_chars": 400},
+    )
+    if text["total_chars"] < 1_000:
+        raise SmokeFailure(
+            f"filing text is only {text['total_chars']} chars — extraction "
+            f"probably failed"
+        )
+    opening = text["text"][:60].replace("\n", " ")
+    print(
+        f"  get_filing_text     {text['total_chars']:,} chars, "
+        f"truncated={text['truncated']}"
+    )
+    print(f"      opens with      {opening!r}")
+
+    # The hidden inline-XBRL header, if it leaks, shows up as element names
+    # in the first window rather than words from the filing.
+    if "us-gaap:" in text["text"]:
+        raise SmokeFailure("hidden XBRL header leaked into the extracted text")
+
+    found = await call(
+        "search_filing_text",
+        {
+            "ticker": ticker,
+            "accession": newest["accession"],
+            "query": "revenue",
+            "max_hits": 1,
+            "context": 120,
+        },
+    )
+    print(f"  search_filing_text  {found['hit_count']} hit(s) for 'revenue'")
+
+
+async def macro_path() -> None:
+    print("\n[macro agent tools]")
+
+    snapshot = await call("get_macro_snapshot", {"series": ["treasury_10y", "vix"]})
+    for key, reading in snapshot["readings"].items():
+        change = reading["changes"].get("3m")
+        moved = "n/a" if change is None else f"{change['change']:+}"
+        print(
+            f"  {key:19s} {reading['value']} ({reading['series_id']}, "
+            f"as of {reading['as_of']}, 3m {moved})"
+        )
+    for key, message in snapshot["unavailable"].items():
+        print(f"      unavailable     {key}: {message[:60]}")
+
+
+async def screener_path() -> None:
+    print("\n[screener agent tools]")
+
+    movers = await call("get_market_movers", {"top": 3})
+    print(
+        f"  get_market_movers   gainers "
+        f"{[g['symbol'] for g in movers['gainers']]}"
+    )
+
+    active = await call("get_most_active", {"top": 3})
+    print(
+        f"  get_most_active     {[s['symbol'] for s in active['symbols']]}"
+    )
+
+    ranked = await call(
+        "rank_candidates", {"symbols": ["NVDA", "AMD", "INTC"]}
+    )
+    for row in ranked["candidates"]:
+        print(
+            f"      {row['rank']}. {row['symbol']:6s} RS {row['relative_strength_63d']:>7} "
+            f"{row['structure']:12s} ATR {row['atr_pct_of_price']}%"
+        )
+    if ranked["unavailable"]:
+        print(f"      not ranked      {ranked['unavailable']}")
+
+
 async def risk_and_journal_path(ticker: str, tech: dict) -> None:
     """Exercise sizing and the journal end to end, on a scratch directory.
 
@@ -253,10 +335,23 @@ async def main(ticker: str) -> int:
 
     scratch = tempfile.mkdtemp(prefix="desk-smoke-theses-")
     os.environ["DESK_THESES_DIR"] = scratch
+    skipped: list[str] = []
 
     try:
         await fundamentals_path(ticker)
         tech = await chartist_path(ticker)
+        await filings_path(ticker)
+        await screener_path()
+
+        # Macro is the one path with a credential the desk can run without.
+        # A missing FRED key is a skip, not a failure.
+        if os.environ.get("FRED_API_KEY", "").strip():
+            await macro_path()
+        else:
+            print("\n[macro agent tools]")
+            print("  SKIPPED — FRED_API_KEY not set")
+            skipped.append("macro (FRED_API_KEY not set)")
+
         await risk_and_journal_path(ticker, tech)
     except SmokeFailure as exc:
         print(f"\nFAILED: {exc}")
@@ -267,6 +362,8 @@ async def main(ticker: str) -> int:
 
     print("\n" + "=" * 60)
     print("All tools reachable and returning expected shapes.")
+    for note in skipped:
+        print(f"Not exercised: {note}")
     return 0
 
 

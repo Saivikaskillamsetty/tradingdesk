@@ -31,7 +31,8 @@ The whole design follows from preventing that.
 
 ## Status
 
-Phase 2 complete: research, sizing and a scoreable record.
+Phase 3 complete: research, sizing, a scoreable record, and the context around
+a name — filings text, macro conditions, candidate discovery.
 
 - [x] EDGAR client — rate limited, disk cached, no API key required
 - [x] Concept resolver with provenance and staleness enforcement
@@ -39,7 +40,7 @@ Phase 2 complete: research, sizing and a scoreable record.
 - [x] `desk` MCP server, verified over stdio
 - [x] Phase 1 — `fundamentals` + `chartist` agents, `/analyze`
 - [x] Phase 2 — `risk` (veto) + journal, `/journal`
-- [ ] Phase 3 — `filings`, `macro`, `screener`
+- [x] Phase 3 — `filings`, `macro`, `screener`
 - [ ] Phase 4 — Alpaca paper execution behind risk approval
 - [ ] Phase 5 — `/postmortem` calibration loop
 
@@ -59,7 +60,7 @@ accident.
 | Variable | Where to get it | Needed by |
 |---|---|---|
 | `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` | [app.alpaca.markets](https://app.alpaca.markets/signup) — switch the dashboard to **Paper**, then API Keys → Generate. Secret shows once. | Phase 1 (`chartist`) |
-| `FRED_API_KEY` | [fredaccount.stlouisfed.org/apikeys](https://fredaccount.stlouisfed.org/apikeys) — instant, free | Phase 3 (`macro`) |
+| `FRED_API_KEY` | [fredaccount.stlouisfed.org/apikeys](https://fredaccount.stlouisfed.org/apikeys) — instant, free | `macro` agent. Everything else runs without it |
 | `SEC_USER_AGENT` | Your own `name email` | optional; defaults in `.mcp.json` |
 
 Paper trading needs no funding, identity check or approval — that applies only
@@ -94,7 +95,13 @@ for fundamentals because it is the source of record rather than a scrape of it.
 | `get_technicals` | Trend, momentum, volatility, support and resistance |
 | `list_line_items` | Supported line item keys |
 | `get_filings` | Recent filings, optionally filtered by form |
+| `get_filing_text` | A filing's text as filed, markup stripped, in windows |
+| `search_filing_text` | Verbatim passages around a term in a filing |
 | `get_insider_activity` | Form 4 insider transactions |
+| `get_macro_snapshot` | Rates, curve, inflation, jobs, vol, dollar — with changes |
+| `get_macro_series` | One macro series in detail |
+| `get_market_movers` / `get_most_active` | Discovery lists from the tape |
+| `rank_candidates` | Orders a symbol list by relative strength |
 | `size_position` | Share count, capital at risk, every limit checked, verdict |
 | `get_risk_policy` | The standing limits, each with its rationale |
 | `journal_thesis` | Records a call with its evidence and falsifiers |
@@ -141,6 +148,18 @@ Set `DESK_THESES_DIR` to keep the book somewhere other than the repository.
   agent code. Same seam later carries a non-US broker.
 - **Non-US-GAAP filers** (foreign issuers on IFRS) are not covered by the
   current concept registry.
+- **The screener has no universe.** It ranks a list you give it and reads the
+  venue's movers and most-active tables. It cannot screen "all US software
+  above $2B" — there is no fundamental universe behind it, and a themed list
+  assembled by an agent is a recollection, not a screen. The `screener` agent
+  is instructed to say which it is.
+- **Filing text is text.** `get_filing_text` strips markup and returns what
+  was filed. Tables survive as readable rows, but nothing is parsed into
+  figures — a number read out of filing prose has no XBRL concept behind it,
+  so prefer `get_financials` whenever the figure exists there.
+- **Macro needs its own key.** Without `FRED_API_KEY` the macro tools fail
+  with a message saying where to get one. Nothing else on the desk depends
+  on them.
 - **Portfolio heat only sees the journal.** A position taken without recording
   it is invisible to the risk checks, so the heat number is exposure as
   recorded rather than exposure as held. `size_position` says so in its
