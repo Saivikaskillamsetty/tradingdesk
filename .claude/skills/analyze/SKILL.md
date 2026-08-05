@@ -1,12 +1,13 @@
 ---
 name: analyze
-description: Full research pass on a stock — runs fundamental and technical analysis in parallel, then synthesises them into a single verdict with cited figures. Use when the user asks to analyse, research, or look at a ticker, or types /analyze TICKER.
+description: Full research pass on a stock — runs fundamental and technical analysis in parallel, sizes the result against the desk's risk limits, then synthesises everything into a single verdict with cited figures. Use when the user asks to analyse, research, or look at a ticker, or types /analyze TICKER.
 ---
 
 # Analyse a stock
 
 Produces one grounded view of a company by running two specialists over the
-same name and reconciling what they find.
+same name, reconciling what they find, and putting any resulting trade in
+front of the risk officer before it is written down.
 
 Argument: a ticker symbol. If none was given, ask for one rather than guessing.
 
@@ -24,12 +25,28 @@ Give each the ticker and any context the user supplied about their intent
 one agent's findings to the other; independent reads are what makes their
 agreement or disagreement informative.
 
+## Then the risk officer
+
+**`risk`** runs after, not alongside — it needs the chartist's entry, stop,
+target and ATR, so it cannot start until that report exists. Dispatch it only
+when the reconciliation below points to an actual position. A watchlist
+conclusion has nothing to size.
+
+The risk officer needs **account equity**. If the user has not given it, ask
+before dispatching. Do not supply a placeholder — a share count sized against
+an invented account is worse than no share count, and it will read as real.
+
+Pass it the ticker, direction, and the chartist's entry, stop, target and ATR
+verbatim. Its verdict is binding: `vetoed` means the trade does not appear in
+the output as a trade, however good the reconciliation looked. Report the veto
+and what would have to change.
+
 ## Synthesise
 
-Your job is reconciliation, not summary. Do not concatenate the two reports.
+Your job is reconciliation, not summary. Do not concatenate the reports.
 
 **Where they agree**, say so plainly and briefly — that is the strongest signal
-available at this stage.
+available.
 
 **Where they disagree, lead with it.** Divergence is the most valuable output of
 this whole process, and it usually resolves one of a few ways:
@@ -48,17 +65,19 @@ period in question and why.
 ## Rules that carry through
 
 Every figure in your output must trace back to a specialist's tool call. You
-compute nothing yourself — no ratios, no averages, no reward-to-risk you worked
-out in your head. If you want a number neither agent reported, ask for it rather
+compute nothing yourself — no ratios, no averages, no reward-to-risk, and above
+all no share counts. If you want a number no agent reported, ask for it rather
 than deriving it.
 
 Cite the period on financial figures (`revenue $416.2B (FY2025)`) and the level
-on technical ones. If either agent flagged a gap or a limitation, it survives
-into your output — do not let a clean-looking summary hide it.
+on technical ones. If any agent flagged a gap or a limitation, it survives into
+your output — do not let a clean-looking summary hide it. The risk officer's
+`limitations` are checks that did not run, and an approval carrying them is
+provisional; say so.
 
-If either specialist reports a data error, say what is missing and how it
-narrows the conclusion. A partial answer with a named gap is useful; a complete
-answer built on a guess is not.
+If a specialist reports a data error, say what is missing and how it narrows
+the conclusion. A partial answer with a named gap is useful; a complete answer
+built on a guess is not.
 
 ## Output
 
@@ -69,16 +88,36 @@ Keep it tight. A page, not an essay.
 - **The case for** — strongest supporting evidence, cited.
 - **The case against** — strongest opposing evidence, cited. This section is
   never empty; if you cannot fill it, you have not looked hard enough.
-- **If taking a position** — entry, stop, target and reward:risk from the
-  chartist. Flag that sizing is not yet covered; the risk officer arrives in
-  Phase 2.
+- **If taking a position** — entry, stop and target from the chartist; shares,
+  dollar risk, percentage of equity at risk and portfolio heat from the risk
+  officer, with its verdict stated. If the risk officer vetoed it, this section
+  says so and gives the reason. If no risk pass was run, say that rather than
+  implying one.
 - **What would change this view** — specific, observable triggers. Price levels,
-  a filing, a metric crossing a threshold.
-- **Gaps** — data unavailable, stale, or unresolved.
+  a filing, a metric crossing a threshold. These become the falsifiers on the
+  journalled thesis, so make them observable rather than rhetorical.
+- **Gaps** — data unavailable, stale, or unresolved, from any of the three.
 
-End by asking whether to journal the thesis. Once Phase 2 lands, that is what
-makes calls scoreable later — an unrecorded call cannot be graded, and
-ungraded calls are how people convince themselves they were right all along.
+## Journal it
+
+End by asking whether to record the thesis. On yes, call `journal_thesis` with:
+
+- the verdict as `thesis`, in plain language;
+- `falsifiers` taken from "What would change this view" — required, and the
+  reason the entry is scoreable at all;
+- `evidence` as `{"claim", "source", "period"}` entries drawn from the cited
+  figures, so the call can later be audited against the filings;
+- `gaps` carried over verbatim;
+- `direction="watch"` when the conclusion was to take no position, filling in
+  entry, stop, target, shares, dollar risk and risk verdict only where there
+  actually was a risk pass.
+
+Record watch calls too. A watchlist name that ran away without you is exactly
+as informative as a trade that failed, and only one of the two tends to get
+remembered.
+
+Confirm the thesis id back to the user so it can be closed later with
+`close_thesis`.
 
 ## Boundaries
 

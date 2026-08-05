@@ -11,7 +11,10 @@ Usage:  uv run python scripts/smoke_test.py [TICKER]
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 import sys
+import tempfile
 
 from desk_mcp.server import mcp
 
@@ -86,7 +89,7 @@ async def fundamentals_path(ticker: str) -> None:
     print(f"  get_insider_activity {insider['form_4_count']} Form 4 filings")
 
 
-async def chartist_path(ticker: str) -> None:
+async def chartist_path(ticker: str) -> dict:
     print("\n[chartist agent tools]")
 
     tech = await call("get_technicals", {"ticker": ticker})
@@ -123,6 +126,124 @@ async def chartist_path(ticker: str) -> None:
         )
 
     print(f"      limitations     {tech['limitations'] or 'none'}")
+    return tech
+
+
+async def risk_and_journal_path(ticker: str, tech: dict) -> None:
+    """Exercise sizing and the journal end to end, on a scratch directory.
+
+    The levels here are derived from ATR rather than taken from a real setup:
+    the point is that the tools are wired together, not that this is a trade
+    anyone should take.
+    """
+    print("\n[risk officer and journal tools]")
+
+    atr = tech["volatility"]["atr_14"]
+    entry = tech["price"]["last_close"]
+    if not atr or not entry:
+        raise SmokeFailure("no ATR or last close available to size against")
+
+    stop = round(entry - 2 * atr, 2)
+    target = round(entry + 5 * atr, 2)
+
+    policy = await call("get_risk_policy", {})
+    print(f"  get_risk_policy     {len(policy['rules'])} rules")
+
+    sized = await call(
+        "size_position",
+        {
+            "ticker": ticker,
+            "direction": "long",
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "account_equity": 100_000.0,
+            "atr": atr,
+        },
+    )
+    sizing = sized["sizing"]
+    print(
+        f"  size_position       {sized['verdict']} — {sizing['shares']} shares, "
+        f"${sizing['dollar_risk']:,.0f} at risk "
+        f"({sizing['pct_equity_at_risk']}% of equity)"
+    )
+    print(
+        f"      reward:risk     {sized['levels']['reward_risk']}:1 at "
+        f"{sized['levels']['stop_atr_multiple']}x ATR"
+    )
+    print(f"      heat after      {sized['portfolio']['heat_after_this_trade_pct']}%")
+    if sized["vetoes"]:
+        print(f"      vetoes          {sized['vetoes']}")
+
+    recorded = await call(
+        "journal_thesis",
+        {
+            "ticker": ticker,
+            "thesis": "Smoke test entry — not a real call.",
+            "falsifiers": [f"close below {stop}"],
+            "direction": "long",
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "reward_risk": sized["levels"]["reward_risk"],
+            "shares": sizing["shares"],
+            "dollar_risk": sizing["dollar_risk"],
+            "risk_verdict": sized["verdict"],
+            "evidence": [
+                {
+                    "claim": f"last close {entry}",
+                    "source": "get_technicals",
+                    "period": tech["price"]["last_date"],
+                }
+            ],
+        },
+    )
+    thesis_id = recorded["id"]
+    print(f"  journal_thesis      {thesis_id}")
+
+    listed = await call("list_theses", {"status": "open"})
+    if not any(t["id"] == thesis_id for t in listed["theses"]):
+        raise SmokeFailure("journalled thesis did not come back from list_theses")
+    print(f"  list_theses         {len(listed['theses'])} open")
+
+    fetched = await call("get_thesis", {"thesis_id": thesis_id})
+    if not fetched["falsifiers"]:
+        raise SmokeFailure("falsifiers did not survive the round trip")
+    print(f"  get_thesis          falsifiers intact ({len(fetched['falsifiers'])})")
+
+    # A second sizing call must now see the first position in portfolio heat.
+    reheated = await call(
+        "size_position",
+        {
+            "ticker": ticker,
+            "direction": "long",
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "account_equity": 100_000.0,
+            "atr": atr,
+        },
+    )
+    if reheated["portfolio"]["open_positions"] < 1:
+        raise SmokeFailure("open thesis did not register in portfolio heat")
+    print(
+        f"  heat picked up      {reheated['portfolio']['open_positions']} open, "
+        f"{reheated['portfolio']['open_heat_pct']}% before this trade"
+    )
+
+    closed = await call(
+        "close_thesis",
+        {
+            "thesis_id": thesis_id,
+            "outcome": "target_hit",
+            "exit_price": target,
+            "note": "Smoke test close.",
+        },
+    )
+    print(
+        f"  close_thesis        {closed['outcome']['result']} at "
+        f"{closed['outcome']['realised_r']}R"
+    )
 
 
 async def main(ticker: str) -> int:
@@ -130,12 +251,19 @@ async def main(ticker: str) -> int:
     print(f"Smoke test — full /analyze data path for {ticker}")
     print("=" * 60)
 
+    scratch = tempfile.mkdtemp(prefix="desk-smoke-theses-")
+    os.environ["DESK_THESES_DIR"] = scratch
+
     try:
         await fundamentals_path(ticker)
-        await chartist_path(ticker)
+        tech = await chartist_path(ticker)
+        await risk_and_journal_path(ticker, tech)
     except SmokeFailure as exc:
         print(f"\nFAILED: {exc}")
         return 1
+    finally:
+        # Never leave smoke-test theses where the real journal can find them.
+        shutil.rmtree(scratch, ignore_errors=True)
 
     print("\n" + "=" * 60)
     print("All tools reachable and returning expected shapes.")

@@ -31,14 +31,14 @@ The whole design follows from preventing that.
 
 ## Status
 
-Phase 0 complete: data foundation and correctness gate.
+Phase 2 complete: research, sizing and a scoreable record.
 
 - [x] EDGAR client — rate limited, disk cached, no API key required
 - [x] Concept resolver with provenance and staleness enforcement
 - [x] Golden tests (23) pinned to filed 10-Ks
 - [x] `desk` MCP server, verified over stdio
-- [ ] Phase 1 — `fundamentals` + `chartist` agents, `/analyze`
-- [ ] Phase 2 — `risk` (veto) + journal
+- [x] Phase 1 — `fundamentals` + `chartist` agents, `/analyze`
+- [x] Phase 2 — `risk` (veto) + journal, `/journal`
 - [ ] Phase 3 — `filings`, `macro`, `screener`
 - [ ] Phase 4 — Alpaca paper execution behind risk approval
 - [ ] Phase 5 — `/postmortem` calibration loop
@@ -90,9 +90,46 @@ for fundamentals because it is the source of record rather than a scrape of it.
 |---|---|
 | `get_financials` | Full statement, 17 line items, each with provenance |
 | `get_financial_history` | Historical series for one line item |
+| `get_metrics` | Margins, returns, growth, leverage, cash conversion |
+| `get_technicals` | Trend, momentum, volatility, support and resistance |
 | `list_line_items` | Supported line item keys |
 | `get_filings` | Recent filings, optionally filtered by form |
 | `get_insider_activity` | Form 4 insider transactions |
+| `size_position` | Share count, capital at risk, every limit checked, verdict |
+| `get_risk_policy` | The standing limits, each with its rationale |
+| `journal_thesis` | Records a call with its evidence and falsifiers |
+| `list_theses` / `get_thesis` | The book, open or closed |
+| `close_thesis` | Resolves a call and computes realised R |
+
+## Risk limits
+
+The `risk` agent holds a veto and does not exercise judgement about it — the
+limits are policy, checked in Python, and quoted back with the reason they
+exist. `get_risk_policy` returns them at runtime.
+
+| Limit | Value | Why |
+|---|---|---|
+| Risk per trade | 1% of equity | Ten consecutive losses cost a tenth of the account, which is survivable |
+| Position size | 20% of equity | A tight stop makes a huge position look cheap; gaps do not respect stops |
+| Portfolio heat | 6% of equity | The total loss accepted if every open thesis fails at once |
+| Reward:risk | 2:1 minimum | Below it the strategy needs a win rate nobody here has demonstrated |
+| Stop distance | 1.5x ATR(14) | A stop inside daily noise is an exit schedule, not protection |
+
+Correlation is the one call the checks cannot make: three 1% positions on the
+same driver are one 3% position in disguise, and the agent is instructed to
+veto that even when every numeric limit passes.
+
+## The journal
+
+Theses are JSON files under `theses/`, one per call, written at the moment the
+call is made — greppable, diffable, and reviewable alongside the code that
+produced them. A thesis will not record without at least one falsifier, and
+`direction="watch"` calls are recorded too: a watchlist name that ran away
+without you is as informative as a trade that failed, and only one of the two
+tends to get remembered. Realised R is computed on close from the recorded
+entry and stop, so outcomes compare across positions of different sizes.
+
+Set `DESK_THESES_DIR` to keep the book somewhere other than the repository.
 
 ## Known limitations
 
@@ -104,6 +141,10 @@ for fundamentals because it is the source of record rather than a scrape of it.
   agent code. Same seam later carries a non-US broker.
 - **Non-US-GAAP filers** (foreign issuers on IFRS) are not covered by the
   current concept registry.
+- **Portfolio heat only sees the journal.** A position taken without recording
+  it is invisible to the risk checks, so the heat number is exposure as
+  recorded rather than exposure as held. `size_position` says so in its
+  `limitations` on every call.
 
 ## Not financial advice
 
