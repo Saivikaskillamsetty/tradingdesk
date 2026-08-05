@@ -235,6 +235,23 @@ class AlpacaSource:
         )
 
 
+def alpaca_credentials() -> tuple[str, str]:
+    """Alpaca key and secret from the environment.
+
+    Shared with the screener, which hits Alpaca endpoints that return no bars
+    and so has no use for a `PriceSource`, but needs the same credentials and
+    the same error when they are missing.
+    """
+    key = os.environ.get("ALPACA_API_KEY", "")
+    secret = os.environ.get("ALPACA_SECRET_KEY", "")
+    if not key or not secret:
+        raise PriceError(
+            "ALPACA_API_KEY and ALPACA_SECRET_KEY must be set. "
+            "Run `uv run python scripts/check_keys.py` to verify."
+        )
+    return key, secret
+
+
 def default_source() -> PriceSource:
     """The price source the desk uses unless told otherwise."""
     return AlpacaSource(feed=os.environ.get("DESK_PRICE_FEED", "sip"))

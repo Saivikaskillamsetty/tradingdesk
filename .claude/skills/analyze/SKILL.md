@@ -25,6 +25,26 @@ Give each the ticker and any context the user supplied about their intent
 one agent's findings to the other; independent reads are what makes their
 agreement or disagreement informative.
 
+## Bring in the others when the question demands it
+
+Two more specialists exist. Dispatch them only when there is a reason, and say
+in the output that you did.
+
+- **`filings`** — when either specialist reports a figure they could not
+  explain: a net income figure that outran operating income, a margin that
+  moved sharply, a price gap with no structural cause. This is the agent that
+  closes "worth checking the 10-Q" instead of leaving it in the gaps section.
+  It can run in parallel with the first two when you already know the question,
+  or after when the question only emerges from their reports.
+- **`macro`** — when the thesis depends on the environment rather than the
+  name: long-duration growth against the ten-year, overseas revenue against
+  the dollar, a swing entry against an elevated VIX. Runs in parallel with the
+  first two; it needs nothing from them.
+
+Do not run either by reflex. A macro read attached to every analysis is how a
+desk talks itself into positions it does not understand, and both agents cost
+a round trip.
+
 ## Then the risk officer
 
 **`risk`** runs after, not alongside — it needs the chartist's entry, stop,
