@@ -1,0 +1,19 @@
+# Bound to the loopback interface deliberately.
+#
+# Streamlit's default is 0.0.0.0, which publishes the app to every interface on
+# the machine and prints an external URL. This app can write to the thesis
+# journal and Streamlit ships no authentication, so anyone who reached that URL
+# would be the operator.
+#
+# Hosting this later means putting a reverse proxy with real authentication in
+# front of it and setting DESK_UI_READONLY=1 unless writes are genuinely
+# needed. Changing this line alone is not enough.
+[server]
+address = "127.0.0.1"
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "dark"

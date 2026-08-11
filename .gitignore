@@ -6,3 +6,6 @@ __pycache__/
 desk.db
 .env
 .DS_Store
+
+# Streamlit local secrets, if ever used
+.streamlit/secrets.toml

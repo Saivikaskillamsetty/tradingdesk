@@ -99,6 +99,57 @@ research → risk approves → thesis journalled → place_order(thesis_id)
 A request to "just buy 100 shares" has no way to be expressed — `place_order`
 takes a thesis id and nothing else.
 
+## The dashboard
+
+A local Streamlit app over the same `desk_mcp` modules the agents call:
+
+```bash
+uv run --extra ui streamlit run desk_ui/Home.py
+```
+
+**No language model runs in it.** Everything it shows — financials, metrics,
+technicals, sizing, forecasts, 13F and congressional disclosures, the journal,
+the scoreboard, desk health — is deterministic Python. Judgement stays in
+Claude Code, where the agents live; the dashboard is for the parts that were
+never judgement to begin with.
+
+| Page | Shows |
+|---|---|
+| Home | Open calls, capital at risk, book integrity, missing credentials |
+| Research | Financials with their XBRL concepts, derived metrics, technicals, filings |
+| Scoreboard | Expectancy, calibration, per-call review |
+| Sizing & odds | Position sizing against the limits, and the probabilities the levels imply |
+| Smart money | 13F books with quarter-over-quarter changes, congressional trades, Form 4 |
+| Market | Macro snapshot, movers, relative strength, expected move |
+| Journal | Record and close calls |
+
+The app inherits the desk's rules rather than restating them. Figures carry the
+period and the concept they came from. A failed call renders as a named gap,
+because an empty table reads as an answer. `limitations` are rendered inline
+and never behind a collapsed panel — a limitation nobody reads is one that does
+not exist.
+
+Two journal rules are enforced in the form, since this is the one place a call
+can be written without an agent having read them first: a thesis will not
+record without a falsifier, and a position will not close without an exit
+price. Both are tested.
+
+### Exposing it
+
+It binds to `127.0.0.1` via `.streamlit/config.toml`. Streamlit's own default
+is `0.0.0.0`, which publishes an external URL — unsuitable here, because the
+app writes to the journal and Streamlit ships no authentication. Anyone
+reaching the URL would be the operator.
+
+Hosting it later means a reverse proxy with real authentication in front, and
+`DESK_UI_READONLY=1` unless writes are genuinely needed:
+
+```bash
+DESK_UI_READONLY=1 uv run --extra ui streamlit run desk_ui/Home.py
+```
+
+Changing the bind address alone is not enough.
+
 ## Setup
 
 ```bash
