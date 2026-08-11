@@ -44,6 +44,28 @@ a loop that grades the calls afterwards.
 - [x] Phase 3 — `filings`, `macro`, `screener`
 - [x] Phase 4 — `pilot`, Alpaca paper execution behind risk approval
 - [x] Phase 5 — `/postmortem` calibration loop
+- [x] Phase 6 — `capitol`, `oracle`, `ledger`
+
+## The agents
+
+Ten specialists, each with a narrow remit and a matching tool allowlist. None
+of them computes anything; every figure comes from a tool call.
+
+| Agent | Answers | Explicitly does not |
+|---|---|---|
+| `fundamentals` | Is this a business worth owning? | Price, timing |
+| `chartist` | Is this a reasonable moment? | Business quality |
+| `filings` | What did the company actually say? | Compute ratios |
+| `macro` | Does the environment support this? | Individual companies |
+| `screener` | Which names are worth researching? | Analyse them |
+| `capitol` | What are better-informed holders doing? | Business, chart, price |
+| `oracle` | How far, and how likely? | **Which way** |
+| `risk` | How large, and may it be taken at all? | Judge the thesis |
+| `pilot` | What did the broker actually do? | Hold any view |
+| `ledger` | What does the book say, and is it intact? | Hold any view |
+
+Slash commands compose them: `/analyze` runs research and sizing, `/journal`
+keeps the book, `/postmortem` grades it.
 
 ## Setup
 
@@ -78,9 +100,10 @@ uv run python scripts/check_keys.py
 
 | Source | Provides | Auth |
 |---|---|---|
-| SEC EDGAR | XBRL financials, filings, Form 4 insider | none (User-Agent only) |
+| SEC EDGAR | XBRL financials, filings, Form 4 insider, 13F institutional | none (User-Agent only) |
 | Alpaca | Bars, quotes, news, paper orders/positions | free API key |
 | FRED | Rates, curve, inflation | free API key |
+| House Clerk | Congressional STOCK Act disclosures | none |
 
 Deliberately **not** used: `yfinance` (unofficial endpoints, silent empty
 responses) and Stooq (now behind a JS proof-of-work wall). EDGAR is preferred
@@ -115,6 +138,12 @@ for fundamentals because it is the source of record rather than a scrape of it.
 | `reconcile_positions` | Broker positions against journalled theses |
 | `score_book` | Expectancy, win rate, payoff and calibration across closed calls |
 | `review_thesis` | One call with its plan, its result and the gap between them |
+| `get_institutional_holdings` | A manager's 13F book and its quarter-over-quarter changes |
+| `get_congress_trades` | STOCK Act disclosures, filtered by ticker or member |
+| `get_congress_activity` | Names appearing most across recent congressional filings |
+| `get_price_distribution` | Expected move and terminal distribution over a horizon |
+| `get_path_probabilities` | Odds of target before stop, and the breakeven win rate |
+| `get_desk_health` | The desk's own record-keeping, audited for silent failures |
 
 ## Risk limits
 
@@ -145,6 +174,85 @@ tends to get remembered. Realised R is computed on close from the recorded
 entry and stop, so outcomes compare across positions of different sizes.
 
 Set `DESK_THESES_DIR` to keep the book somewhere other than the repository.
+
+## Smart money
+
+Three populations, three different signals, and conflating them is how this
+data gets misread. All of it is disclosed late; the discipline is refusing to
+describe stale filings in the present tense.
+
+| Source | Lag | What the filer knows |
+|---|---|---|
+| Form 4 insider | 2 business days | Legally presumed to know something |
+| 13F institutional | Quarter end, filed up to 45 days later | Managed the position six weeks ago |
+| Congress PTR | Up to 45 days, often late | Frequently an outside manager, not the member |
+
+**13Fs are aggregated per security.** A manager with sub-advisers files the
+same issuer on many lines — Berkshire reports Apple twelve times — so reading
+the table row-wise reports a twelfth of the real position. Changes are computed
+from **share counts, never values**: a holding marked down by the market is not
+a sale, and treating it as one is simply wrong. Each position carries
+`implied_price_per_share` as a self-check, because filings before 2023 reported
+value in thousands rather than dollars.
+
+**Congressional amounts are statutory bands.** `$1,001 - $15,000` is what was
+filed; a midpoint is a number nobody reported. Transactions live inside filing
+PDFs, so they are parsed from extracted text and every row carries the document
+link. Scanned filings that extract to nothing are reported under
+`unreadable_filings` rather than dropped — a member whose filing cannot be read
+is not a member who did not trade.
+
+## Forecasting
+
+`oracle` produces distributions, never predictions, and the reason is worth
+stating plainly.
+
+**Drift is assumed to be zero.** Not because stocks do not rise, but because
+drift cannot be estimated from the data available: the standard error of a mean
+return measured from a year of daily data is roughly the annual volatility
+itself, so a measured 12% drift on a 30%-vol name carries an error bar of about
+±30%. Volatility is estimable from the same sample to within a few percent. So
+the model forecasts the spread and refuses to forecast direction — which makes
+it useless for picking sides and useful for the questions intuition gets wrong.
+
+Two models run on every question. **Gaussian** is analytically clean and wrong
+in the tails; **bootstrap** resamples the name's own history and carries its
+real skew. Where they disagree, the normal assumption is doing damage, and the
+gap is reported rather than averaged away.
+
+The most decision-useful output is `edge_vs_breakeven`. A 2:1 setup must reach
+target a third of the time simply to break even. When the modelled probability
+sits below that, the geometry does not pay under zero drift and the entire case
+has to come from the thesis — which the model cannot see and will not pretend
+to.
+
+`analytic_unlimited_time` is the closed form for a driftless walk, where the
+odds depend only on the log distances to each barrier. Simulated figures sit
+below it because the horizon expires; a large gap means the trade is not wrong,
+it is being given too little time.
+
+Barriers are checked at daily closes, so an intraday spike through the stop
+that closes back inside is not counted — real stop-outs are somewhat more
+likely than reported. Results are seeded, so the same question returns the same
+answer; a probability that moved on refresh could not be quoted in a thesis or
+checked afterwards.
+
+## Desk health
+
+`get_desk_health` audits the desk rather than a company, because the failures
+that corrupt every other number here are silent ones:
+
+| Finding | What it corrupts |
+|---|---|
+| Unparseable thesis file | `list_theses` skips it silently — the book is quietly short and heat is understated |
+| Closed without an exit price | No realised R, ever; permanently outside every `score_book` figure |
+| Open position with no dollar risk | Real exposure contributing nothing to portfolio heat |
+| Open thesis past its horizon | Still consuming heat while nobody watches it |
+| Missing credential | Names which tools will fail, before an agent commits to reasoning that needs them |
+
+It runs offline and checks credentials for **presence, not validity** — a
+revoked key passes here and fails at the call site. Values are never read into
+a response.
 
 ## The calibration loop
 
@@ -241,6 +349,23 @@ portfolio heat is blind to.
   it is invisible to the risk checks, so the heat number is exposure as
   recorded rather than exposure as held. `size_position` says so in its
   `limitations` on every call.
+- **13Fs are long US equity only.** No shorts, no cash, no bonds, no foreign
+  listings. Portfolio weights are weights within the reported slice, so a
+  manager described as "22% in Apple" is 22% of the part they had to disclose.
+- **Congress coverage is House-only and partial.** The Senate publishes
+  separately and is not read. Only the reports actually opened are searched, so
+  an absent ticker means "not in the reports read", never "not traded" — the
+  response states how many of how many were parsed.
+- **Congressional trades are parsed from PDF text**, with no structured source
+  behind them. The same caveat as filing text, one step weaker: follow the
+  document link before quoting a specific transaction.
+- **Forecasts assume volatility persists and drift is zero.** Neither holds
+  across an earnings date, and the bands are wrong in both directions over one.
+  The bootstrap resamples days independently, so it reproduces fat tails but
+  not volatility clustering — real drawdowns arrive in consecutive sessions
+  more often than the model allows.
+- **`get_desk_health` is offline.** A reachable-but-broken API looks healthy,
+  and a revoked credential passes a presence check.
 
 ## Not financial advice
 

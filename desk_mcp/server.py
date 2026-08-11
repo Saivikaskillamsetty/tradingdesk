@@ -13,24 +13,29 @@ from mcp.server import MCPServer
 
 from desk_mcp import (
     execution,
+    forecast,
+    health,
     journal,
     macro,
     metrics,
     postmortem,
     risk,
     screener,
+    smartmoney,
     technicals,
 )
 from desk_mcp.edgar import documents, facts, filings
 from desk_mcp.edgar.client import EdgarError
 from desk_mcp.edgar.concepts import ALL_KEYS
 from desk_mcp.execution import ExecutionError
+from desk_mcp.forecast import ForecastError
 from desk_mcp.journal import JournalError
 from desk_mcp.macro import MacroError
 from desk_mcp.postmortem import PostmortemError
 from desk_mcp.prices.source import PriceError
 from desk_mcp.risk import RiskError
 from desk_mcp.screener import ScreenerError
+from desk_mcp.smartmoney import SmartMoneyError
 
 mcp = MCPServer(
     name="desk",
@@ -704,6 +709,166 @@ def review_thesis(thesis_id: str) -> dict[str, Any]:
     try:
         return postmortem.review(thesis_id)
     except (PostmortemError, JournalError, OSError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_institutional_holdings(institution: str, quarters: int = 2) -> dict[str, Any]:
+    """A manager's 13F equity book, and what changed since the prior quarter.
+
+    Positions are aggregated per security across sub-advisers, so a manager
+    that reports the same issuer on several lines is reported once at the full
+    size. Changes are computed from share counts, never values — a position
+    marked down by the market was not sold.
+
+    A 13F is long US-listed equity only, as of a quarter end, filed up to 45
+    days later. Quote the period, not the present tense.
+
+    Args:
+        institution: Manager name or CIK. Names resolve through EDGAR; an
+            ambiguous name returns the candidates rather than guessing.
+        quarters: 13F periods to read. 2 gives the latest plus its comparison.
+    """
+    try:
+        return smartmoney.holdings(institution, quarters=quarters)
+    except (SmartMoneyError, EdgarError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_congress_trades(
+    ticker: str | None = None,
+    member: str | None = None,
+    year: int | None = None,
+    max_reports: int = 40,
+) -> dict[str, Any]:
+    """Congressional stock trades disclosed under the STOCK Act.
+
+    Amounts are the statutory bands members file, never exact figures. Report
+    the range as given; there is no precise number behind it.
+
+    Only the reports actually opened are searched, so an absent ticker means
+    "not in the reports read", not "not traded". The response says how many of
+    how many were read.
+
+    Args:
+        ticker: Optional symbol filter.
+        member: Optional case-insensitive substring of a member's name.
+        year: Disclosure year. Defaults to the current one.
+        max_reports: Reports to open and parse, newest first.
+    """
+    try:
+        return smartmoney.congress_trades(
+            ticker=ticker, member=member, year=year, max_reports=max_reports
+        )
+    except SmartMoneyError as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_congress_activity(
+    year: int | None = None, max_reports: int = 40, top: int = 20
+) -> dict[str, Any]:
+    """Names appearing most often across recent congressional disclosures.
+
+    Counts disclosures, not dollars or conviction: a $1,001 purchase and a
+    $5,000,001 purchase count the same.
+
+    Args:
+        year: Disclosure year. Defaults to the current one.
+        max_reports: Reports to open and parse, newest first.
+        top: How many symbols to return.
+    """
+    try:
+        return smartmoney.congress_activity_by_ticker(
+            year=year, max_reports=max_reports, top=top
+        )
+    except SmartMoneyError as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_price_distribution(
+    ticker: str, horizon_days: int = 21, lookback_days: int = 500
+) -> dict[str, Any]:
+    """Where a price could be in N trading days, as a distribution.
+
+    Drift is assumed to be zero, deliberately: a drift estimated from this much
+    history carries a standard error comparable to the volatility itself. This
+    forecasts the spread and refuses to forecast direction, so it can never
+    support a bullish or bearish claim on its own.
+
+    Returns Gaussian and bootstrap quantiles side by side. Where they diverge,
+    the normal assumption is understating this name's tails — report the gap
+    rather than averaging the two.
+
+    Args:
+        ticker: Symbol to model.
+        horizon_days: Trading days ahead. 21 is roughly a month, 63 a quarter.
+        lookback_days: Calendar days of history to measure volatility over.
+    """
+    try:
+        return forecast.distribution(
+            ticker, horizon_days=horizon_days, lookback_days=lookback_days
+        )
+    except (ForecastError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_path_probabilities(
+    ticker: str,
+    entry: float,
+    stop: float,
+    target: float,
+    horizon_days: int = 21,
+    lookback_days: int = 500,
+) -> dict[str, Any]:
+    """Odds of reaching the target before the stop, and the win rate required.
+
+    Simulates the trade under zero drift and reports the probability of each
+    barrier being hit first, the expected outcome in R, and the win rate the
+    geometry needs to break even. A negative `edge_vs_breakeven` means the
+    levels do not pay without a directional edge the model cannot see — the
+    case has to come from the thesis.
+
+    Barriers are checked at daily closes, so real stop-outs are somewhat more
+    likely than reported.
+
+    Args:
+        ticker: Symbol to model.
+        entry: Planned entry price.
+        stop: Protective stop.
+        target: Profit target.
+        horizon_days: Trading days the trade is given to work.
+        lookback_days: Calendar days of history to measure volatility over.
+    """
+    try:
+        return forecast.path_probabilities(
+            ticker,
+            entry=entry,
+            stop=stop,
+            target=target,
+            horizon_days=horizon_days,
+            lookback_days=lookback_days,
+        )
+    except (ForecastError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def get_desk_health() -> dict[str, Any]:
+    """The state of the desk's own record-keeping and dependencies.
+
+    Reports the failures that are otherwise silent: theses closed without an
+    exit price, open calls that have outlived their horizon, positions carrying
+    no dollar risk, unparseable thesis files, and missing credentials.
+
+    Runs offline and checks credentials for presence, not validity.
+    """
+    try:
+        return health.desk_health()
+    except (JournalError, OSError) as exc:
         return _error(exc)
 
 
