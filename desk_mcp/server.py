@@ -11,13 +11,23 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from desk_mcp import execution, journal, macro, metrics, risk, screener, technicals
+from desk_mcp import (
+    execution,
+    journal,
+    macro,
+    metrics,
+    postmortem,
+    risk,
+    screener,
+    technicals,
+)
 from desk_mcp.edgar import documents, facts, filings
 from desk_mcp.edgar.client import EdgarError
 from desk_mcp.edgar.concepts import ALL_KEYS
 from desk_mcp.execution import ExecutionError
 from desk_mcp.journal import JournalError
 from desk_mcp.macro import MacroError
+from desk_mcp.postmortem import PostmortemError
 from desk_mcp.prices.source import PriceError
 from desk_mcp.risk import RiskError
 from desk_mcp.screener import ScreenerError
@@ -634,6 +644,66 @@ def reconcile_positions() -> dict[str, Any]:
     try:
         return execution.reconcile()
     except (ExecutionError, JournalError, PriceError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def score_book(
+    ticker: str | None = None,
+    horizon: str | None = None,
+    direction: str | None = None,
+    since: str | None = None,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Grade the closed book: expectancy, win rate, and whether conviction paid.
+
+    Returns performance in R across every closed thesis, broken down by
+    conviction, horizon, direction and outcome, plus the calibration read —
+    whether stated conviction actually predicted results, and whether targets
+    were set where positions were really exited.
+
+    Every figure is computed here. Never work out expectancy, a win rate or an
+    average R yourself; quote what this returns and the sample it rests on.
+    Read `limitations` before drawing any conclusion — a small sample and a
+    real edge produce the same numbers.
+
+    Args:
+        ticker: Optional symbol filter.
+        horizon: Optional "swing", "positional" or "long_term" filter.
+        direction: Optional "long", "short" or "watch" filter.
+        since: Optional ISO date; only theses created on or after it.
+        limit: Maximum closed theses to read.
+    """
+    try:
+        return postmortem.score_book(
+            ticker=ticker,
+            horizon=horizon,
+            direction=direction,
+            since=since,
+            limit=limit,
+        )
+    except (PostmortemError, JournalError, OSError) as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+def review_thesis(thesis_id: str) -> dict[str, Any]:
+    """One call assembled for post-mortem: the plan, the result, the gap.
+
+    Returns the thesis as it was written alongside planned R, realised R, R
+    capture, holding period and how the position was exited. Falsifiers come
+    back unchecked, because whether one fired is a question for the price and
+    the filings rather than for the journal — go and look.
+
+    Works on open theses too, where the useful question is whether a falsifier
+    has already fired.
+
+    Args:
+        thesis_id: Identifier returned by `journal_thesis`.
+    """
+    try:
+        return postmortem.review(thesis_id)
+    except (PostmortemError, JournalError, OSError) as exc:
         return _error(exc)
 
 

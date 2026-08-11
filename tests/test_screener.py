@@ -7,6 +7,7 @@ nothing in the output looks wrong.
 
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 
 import pytest
@@ -14,6 +15,14 @@ import pytest
 from desk_mcp import screener
 from desk_mcp.prices.source import Bar, BarSet, PriceError
 from desk_mcp.screener import ScreenerError
+
+needs_alpaca_keys = pytest.mark.skipif(
+    not (
+        os.environ.get("ALPACA_API_KEY", "").strip()
+        and os.environ.get("ALPACA_SECRET_KEY", "").strip()
+    ),
+    reason="ALPACA_API_KEY / ALPACA_SECRET_KEY not set — the live tape is unreachable",
+)
 
 
 def bars(closes: list[float], symbol: str = "TEST") -> BarSet:
@@ -150,7 +159,14 @@ class TestMostActive:
 
 
 @pytest.mark.network
+@needs_alpaca_keys
 class TestAgainstLiveScreener:
+    """Requires ALPACA_API_KEY and ALPACA_SECRET_KEY.
+
+    Skipped rather than failed when the keys are absent. A suite that goes red
+    for a known environmental reason teaches everyone to ignore red.
+    """
+
     def test_movers_returns_both_sides(self):
         result = screener.movers(top=5)
 

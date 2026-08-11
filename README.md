@@ -31,9 +31,9 @@ The whole design follows from preventing that.
 
 ## Status
 
-Phase 4 complete: research, sizing, a scoreable record, the context around a
-name, and paper execution that cannot be reached except through an approved
-thesis.
+Complete. Research, sizing, a scoreable record, the context around a name,
+paper execution that cannot be reached except through an approved thesis, and
+a loop that grades the calls afterwards.
 
 - [x] EDGAR client — rate limited, disk cached, no API key required
 - [x] Concept resolver with provenance and staleness enforcement
@@ -43,7 +43,7 @@ thesis.
 - [x] Phase 2 — `risk` (veto) + journal, `/journal`
 - [x] Phase 3 — `filings`, `macro`, `screener`
 - [x] Phase 4 — `pilot`, Alpaca paper execution behind risk approval
-- [ ] Phase 5 — `/postmortem` calibration loop
+- [x] Phase 5 — `/postmortem` calibration loop
 
 ## Setup
 
@@ -113,6 +113,8 @@ for fundamentals because it is the source of record rather than a scrape of it.
 | `get_broker_positions` / `get_broker_orders` | Broker state |
 | `cancel_order` / `close_broker_position` | Unwind |
 | `reconcile_positions` | Broker positions against journalled theses |
+| `score_book` | Expectancy, win rate, payoff and calibration across closed calls |
+| `review_thesis` | One call with its plan, its result and the gap between them |
 
 ## Risk limits
 
@@ -143,6 +145,43 @@ tends to get remembered. Realised R is computed on close from the recorded
 entry and stop, so outcomes compare across positions of different sizes.
 
 Set `DESK_THESES_DIR` to keep the book somewhere other than the repository.
+
+## The calibration loop
+
+`/postmortem` grades what the journal recorded. It asks two questions that are
+routinely confused for one:
+
+**Was the call right?** Expectancy in R, win rate, payoff ratio — all computed
+in Python, all quoted rather than derived by an agent.
+
+**Was it right for the reason given?** Every thesis stores falsifiers, and
+`review_thesis` returns them *unchecked*. Answering them means dispatching the
+chartist at the price level, or the filings agent at the disclosure, and
+finding out what actually happened. A thesis that worked because of something
+nobody in the evidence predicted is a losing process with a winning outcome,
+and it is the result most likely to be repeated.
+
+Three numbers do the calibration work:
+
+| Reading | What it means when it breaks |
+|---|---|
+| `conviction_ordering_holds` | `false` — expectancy did not rise with stated conviction, so sizing up on conviction was paying for a signal that is not there |
+| `avg_r_capture` | Realised R over planned R. Well below 1 means targets sit beyond where positions really get exited, and every approved reward:risk was optimistic |
+| `avg_days_held` vs `horizon` | A swing call held four months was re-labelled after the fact, usually by not selling |
+
+Nothing that produced no R is quietly counted as a scratch. Watch calls have no
+R by design; a position closed without an exit price is a record-keeping
+failure. Both appear under `unscored` with the reason, and both are excluded
+from every performance figure rather than dragging it toward zero.
+
+`minimum_meaningful_sample` is 20. Below it the skill is instructed to report
+the numbers as descriptive and draw no inference — three losing trades is not
+evidence of a broken process, and changing the rules on that basis is worse
+than doing nothing.
+
+Findings propose changes; they do not make them. A limit that should move is a
+change to `desk_mcp/risk.py`, argued for separately — a rule rewritten in the
+same pass that discovered it has never been argued with.
 
 ## Execution
 
@@ -205,5 +244,7 @@ portfolio heat is blind to.
 
 ## Not financial advice
 
-A research tool, not a prediction engine. The `/postmortem` loop exists
-because calls need to be scored honestly rather than remembered selectively.
+A research tool, not a prediction engine. `/postmortem` exists because calls
+need to be scored honestly rather than remembered selectively — and a good
+scoreboard is not a reason to trade larger. The limits do not move because
+recent results were pleasant.
