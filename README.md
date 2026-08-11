@@ -45,6 +45,7 @@ a loop that grades the calls afterwards.
 - [x] Phase 4 — `pilot`, Alpaca paper execution behind risk approval
 - [x] Phase 5 — `/postmortem` calibration loop
 - [x] Phase 6 — `capitol`, `oracle`, `ledger`
+- [x] Phase 7 — `/nimbus` orchestrator
 
 ## The agents
 
@@ -64,8 +65,39 @@ of them computes anything; every figure comes from a tool call.
 | `pilot` | What did the broker actually do? | Hold any view |
 | `ledger` | What does the book say, and is it intact? | Hold any view |
 
-Slash commands compose them: `/analyze` runs research and sizing, `/journal`
-keeps the book, `/postmortem` grades it.
+## Orchestration
+
+`/nimbus` is the front door. It takes any request — a ticker, a question, a
+half-formed worry — routes it to the specialists that can answer it, and
+reconciles what comes back into one view.
+
+It runs in the main thread rather than as a subagent, deliberately: an agent
+dispatching agents nests badly, and parallel dispatch is only available where
+the conversation is. Independent specialists go out in a single message and
+come back concurrently; their independence is what makes agreement between
+them worth anything.
+
+Nimbus holds no view of its own. Every claim in its output came back from a
+specialist in that session, and a figure it cannot attribute to a tool call is
+one it must not state. It also defers rather than rebuilds — a full research
+pass on a ticker is handed to `/analyze`, not reimplemented.
+
+| Command | Does |
+|---|---|
+| `/nimbus` | Routes anything to the right specialists and reconciles the answers |
+| `/analyze` | Full research pass on one ticker, sized and journalled |
+| `/journal` | Reads, records and closes calls |
+| `/postmortem` | Grades the closed book and reports what to change |
+
+Money moves through exactly one sequence, and the orchestrator never shortens
+it:
+
+```
+research → risk approves → thesis journalled → place_order(thesis_id)
+```
+
+A request to "just buy 100 shares" has no way to be expressed — `place_order`
+takes a thesis id and nothing else.
 
 ## Setup
 
