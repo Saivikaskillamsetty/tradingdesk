@@ -97,21 +97,39 @@ def metric_row(pairs: list[tuple[str, Any, str | None]]) -> None:
         column.metric(label, "—" if value is None else value, help=helptext)
 
 
-def money(value: float | None, digits: int = 2) -> str:
-    if value is None:
+def _number(value: Any) -> float | None:
+    """Coerce to a float, or None.
+
+    A formatter that raises takes down the whole page over a display detail.
+    Anything that is not a number renders as an em dash, which reads as
+    "not available" — the same thing a missing value should read as.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def money(value: Any, digits: int = 2) -> str:
+    number = _number(value)
+    if number is None:
         return "—"
     for cutoff, suffix in ((1e12, "T"), (1e9, "B"), (1e6, "M")):
-        if abs(value) >= cutoff:
-            return f"${value / cutoff:,.2f}{suffix}"
-    return f"${value:,.{digits}f}"
+        if abs(number) >= cutoff:
+            return f"${number / cutoff:,.2f}{suffix}"
+    return f"${number:,.{digits}f}"
 
 
-def pct(value: float | None, digits: int = 1) -> str:
-    return "—" if value is None else f"{value:,.{digits}f}%"
+def pct(value: Any, digits: int = 1) -> str:
+    number = _number(value)
+    return "—" if number is None else f"{number:,.{digits}f}%"
 
 
-def ratio(value: float | None, digits: int = 2) -> str:
-    return "—" if value is None else f"{value:,.{digits}f}"
+def ratio(value: Any, digits: int = 2) -> str:
+    number = _number(value)
+    return "—" if number is None else f"{number:,.{digits}f}"
 
 
 def frame(rows: list[dict[str, Any]], columns: dict[str, str] | None = None) -> pd.DataFrame:

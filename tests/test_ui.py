@@ -18,9 +18,10 @@ import pytest
 
 pytest.importorskip("streamlit", reason="UI extra not installed: uv sync --extra ui")
 
+import streamlit as st  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from desk_mcp import journal  # noqa: E402
+from desk_mcp import cache, journal  # noqa: E402
 
 UI_ROOT = pathlib.Path(__file__).resolve().parents[1] / "desk_ui"
 PAGES = [UI_ROOT / "Home.py", *sorted((UI_ROOT / "pages").glob("*.py"))]
@@ -30,6 +31,19 @@ PAGES = [UI_ROOT / "Home.py", *sorted((UI_ROOT / "pages").glob("*.py"))]
 def scratch_journal(tmp_path, monkeypatch):
     monkeypatch.setenv("DESK_THESES_DIR", str(tmp_path))
     monkeypatch.delenv("DESK_UI_READONLY", raising=False)
+
+    # `st.cache_data` lives in the process, not in the AppTest, so a result
+    # cached by one test is served to the next one -- including results
+    # computed while a credential was still present.
+    st.cache_data.clear()
+
+    # The on-disk cache underneath is shared with the developer's real session,
+    # where it may already hold a live FRED or EDGAR response. A test asserting
+    # what happens without a credential would then be served the cached answer
+    # and pass for the wrong reason. Patched as an attribute because
+    # `cache.CACHE_DIR` is bound at import and cannot be redirected by setenv.
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path / "cache")
+
     return tmp_path
 
 
@@ -134,12 +148,72 @@ class TestReadOnlyMode:
         assert all(button.disabled for button in app.button)
 
 
+class TestRenderedShapes:
+    """Pages must read the shape the modules actually return.
+
+    A page that reads a key nobody emits raises nothing: it renders an empty
+    table under a confident heading, which is indistinguishable from a real
+    answer of "nothing here". So these assert on content, not on the absence
+    of an exception.
+    """
+
+    def test_sizing_renders_the_real_verdict_and_checks(self):
+        app = run(UI_ROOT / "pages" / "3_Sizing.py")
+
+        app.text_input[0].set_value("NVDA")
+        app.number_input[0].set_value(100_000.0)  # equity
+        app.number_input[1].set_value(200.0)  # entry
+        app.number_input[2].set_value(190.0)  # stop
+        app.number_input[3].set_value(230.0)  # target
+        app.number_input[4].set_value(8.0)  # atr
+        app.button[0].click().run()
+
+        assert not app.exception, [e.value for e in app.exception]
+
+        # The verdict banner must say something, and every rule checked must
+        # reach the table rather than silently vanishing on a renamed key.
+        assert app.success or app.warning or app.error
+        assert app.dataframe, "the checks table did not render"
+        checks = app.dataframe[0].value
+        assert len(checks) > 0
+        assert "Rule" in checks.columns
+
+    def test_sizing_surfaces_shares_rather_than_an_empty_metric(self):
+        app = run(UI_ROOT / "pages" / "3_Sizing.py")
+
+        app.text_input[0].set_value("NVDA")
+        app.number_input[0].set_value(100_000.0)
+        app.number_input[1].set_value(200.0)
+        app.number_input[2].set_value(190.0)
+        app.number_input[3].set_value(230.0)
+        app.button[0].click().run()
+
+        shown = {m.label: m.value for m in app.metric}
+
+        assert shown.get("Shares") not in (None, "—"), shown
+
+    def test_sizing_requires_equity_before_it_computes_anything(self):
+        """A share count sized against a placeholder reads exactly like a real one."""
+        app = run(UI_ROOT / "pages" / "3_Sizing.py")
+
+        app.text_input[0].set_value("NVDA")
+        app.number_input[1].set_value(200.0)
+        app.number_input[2].set_value(190.0)
+        app.button[0].click().run()
+
+        assert any("required" in e.value for e in app.error)
+        assert not app.metric
+
+
 class TestMissingDataIsAGap:
     def test_a_missing_credential_renders_as_a_named_error(self, monkeypatch):
         """An empty table would read as 'nothing here' rather than 'unavailable'."""
-        for name in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY"):
+        for name in ("ALPACA_API_KEY", "ALPACA_SECRET_KEY", "FRED_API_KEY"):
             monkeypatch.delenv(name, raising=False)
 
         app = run(UI_ROOT / "pages" / "5_Market.py")
 
         assert app.error, "a missing key must be surfaced, not swallowed"
+        assert any(
+            "FRED_API_KEY" in e.value or "ALPACA" in e.value for e in app.error
+        ), [e.value for e in app.error]

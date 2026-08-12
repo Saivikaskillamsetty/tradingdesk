@@ -42,33 +42,51 @@ macro_tab, screen_tab, odds_tab = st.tabs(["Macro", "Screener", "Expected move"]
 with macro_tab:
     reading = ui.guard(snapshot)
     if reading:
-        series = reading.get("series") or reading.get("readings") or {}
-        rows = []
-        for key, item in (series.items() if isinstance(series, dict) else []):
-            if not isinstance(item, dict):
-                continue
-            rows.append(
-                {
-                    "Series": item.get("label", key),
-                    "Value": item.get("value"),
-                    "Unit": item.get("unit"),
-                    "As of": item.get("observation_date") or item.get("date"),
-                    "1m": (item.get("change_1m") or {}).get("change")
-                    if isinstance(item.get("change_1m"), dict)
-                    else item.get("change_1m"),
-                    "3m": (item.get("change_3m") or {}).get("change")
-                    if isinstance(item.get("change_3m"), dict)
-                    else item.get("change_3m"),
-                    "FRED id": item.get("series_id"),
-                }
-            )
-        if rows:
-            ui.table(rows)
-        else:
-            st.json(reading, expanded=False)
+        readings = reading.get("readings") or {}
 
-        ui.provenance("Source: FRED. Every reading carries its series id and observation date.")
-        ui.limitations(reading.get("limitations"))
+        def change(item: dict, window: str) -> str:
+            moved = (item.get("changes") or {}).get(window) or {}
+            value = moved.get("change")
+            if value is None:
+                return "—"
+            return f"{value:+.2f}"
+
+        rows = [
+            {
+                "Series": item.get("label", key),
+                "Value": f"{item.get('value')} {item.get('unit', '')}".strip(),
+                "As of": item.get("as_of"),
+                "1m": change(item, "1m"),
+                "3m": change(item, "3m"),
+                "12m": change(item, "12m"),
+                "Reads as": item.get("reads_as", ""),
+                "FRED id": item.get("series_id"),
+            }
+            for key, item in readings.items()
+            if isinstance(item, dict)
+        ]
+        ui.table(rows, empty="No macro readings returned.")
+
+        stale = [
+            item.get("label", key)
+            for key, item in readings.items()
+            if isinstance(item, dict) and (item.get("days_since_observation") or 0) > 45
+        ]
+        if stale:
+            st.warning(
+                "Published with a lag, so these describe a month that has "
+                f"already ended: {', '.join(stale)}."
+            )
+
+        ui.provenance(
+            f"Source: {reading.get('source')}",
+            f"Retrieved {reading.get('retrieved_at', '')[:19]}",
+        )
+
+        notes = [reading["note"]] if reading.get("note") else []
+        unavailable = reading.get("unavailable") or {}
+        notes += [f"**{k}** — {v}" for k, v in unavailable.items()]
+        ui.limitations(notes)
 
 # --- Screener ---------------------------------------------------------------
 with screen_tab:
@@ -103,15 +121,21 @@ with screen_tab:
         symbols = tuple(s.strip().upper() for s in raw.split(",") if s.strip())
         result = ui.guard(lambda: ranked(symbols, benchmark.strip().upper() or "SPY"))
         if result:
-            ui.table(result.get("ranked") or result.get("candidates") or [])
-            ui.limitations(
-                result.get("limitations")
-                or [
-                    "This ranks a list you supplied. It is not a screen — there "
-                    "is no fundamental universe behind it, and a themed list "
-                    "assembled from memory is a recollection, not a screen."
-                ]
+            ui.table(result.get("candidates") or [], empty="Nothing could be ranked.")
+            ui.provenance(
+                f"Ranked by {result.get('ranked_by')}",
+                f"against {result.get('benchmark')}",
             )
+            notes = [result["note"]] if result.get("note") else []
+            notes += [
+                f"**{k}** — {v}" for k, v in (result.get("unavailable") or {}).items()
+            ]
+            notes.append(
+                "This ranks a list you supplied. It is not a screen — there is "
+                "no fundamental universe behind it, and a themed list assembled "
+                "from memory is a recollection, not a screen."
+            )
+            ui.limitations(notes)
 
 # --- Expected move ----------------------------------------------------------
 with odds_tab:

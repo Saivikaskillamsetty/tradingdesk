@@ -96,14 +96,34 @@ if sizing:
     }.get(verdict, st.info)
     banner(f"**{str(verdict).replace('_', ' ').title()}**")
 
-    position = sizing.get("position") or {}
+    # A veto is the tool's, not the reader's. Give the reason top billing.
+    for veto in sizing.get("vetoes") or []:
+        st.error(f"**Veto** — {veto}")
+    for warning in sizing.get("warnings") or []:
+        st.warning(warning)
+
+    position = sizing.get("sizing") or {}
+    levels = sizing.get("levels") or {}
+
     ui.metric_row(
         [
             ("Shares", position.get("shares"), None),
             ("Position value", ui.money(position.get("position_value")), None),
+            ("% of equity", ui.pct(position.get("position_pct_of_equity")), None),
             ("Dollar risk", ui.money(position.get("dollar_risk")), "Loss if the stop fills"),
-            ("% of equity at risk", ui.pct(position.get("risk_pct_of_equity")), None),
-            ("Reward:risk", ui.ratio(position.get("reward_risk")), None),
+            ("% at risk", ui.pct(position.get("pct_equity_at_risk")), None),
+        ]
+    )
+    ui.metric_row(
+        [
+            ("Risk / share", ui.money(levels.get("risk_per_share")), None),
+            ("Reward / share", ui.money(levels.get("reward_per_share")), None),
+            ("Reward:risk", ui.ratio(levels.get("reward_risk")), None),
+            (
+                "Stop in ATR",
+                ui.ratio(levels.get("stop_atr_multiple")),
+                "A stop inside daily noise is an exit schedule, not protection",
+            ),
         ]
     )
 
@@ -118,21 +138,34 @@ if sizing:
         sizing.get("checks", []),
         {
             "rule": "Rule",
-            "observed": "Observed",
-            "limit": "Limit",
             "passed": "Passed",
-            "rationale": "Why the rule exists",
+            "severity": "Severity",
+            "observed": "Observed",
+            "threshold": "Threshold",
+            "message": "What it means",
         },
     )
 
-    heat = sizing.get("portfolio_heat") or {}
-    if heat:
+    portfolio = sizing.get("portfolio") or {}
+    policy_limits = sizing.get("policy") or {}
+    if portfolio:
         st.subheader("Portfolio effect")
         ui.metric_row(
             [
-                ("Heat before", ui.pct(heat.get("current_heat_pct")), None),
-                ("Heat after", ui.pct(heat.get("heat_after_pct")), None),
-                ("Ceiling", ui.pct(heat.get("max_heat_pct")), None),
+                ("Open positions", portfolio.get("open_positions"), None),
+                ("Heat now", ui.pct(portfolio.get("open_heat_pct")), None),
+                (
+                    "Heat after this",
+                    ui.pct(portfolio.get("heat_after_this_trade_pct")),
+                    None,
+                ),
+                (
+                    # Each policy entry is a Rule -- value plus the reason it
+                    # exists -- not a bare number.
+                    "Ceiling",
+                    ui.pct((policy_limits.get("max_portfolio_heat_pct") or {}).get("value")),
+                    (policy_limits.get("max_portfolio_heat_pct") or {}).get("rationale"),
+                ),
             ]
         )
         st.caption(
