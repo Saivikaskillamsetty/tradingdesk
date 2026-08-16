@@ -10,6 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 from desk_mcp import health, journal, postmortem
+from desk_ui import charts
 from desk_ui import common as ui
 
 ui.page(
@@ -53,31 +54,47 @@ status = report["status"]
 errors = [f for f in report["findings"] if f["severity"] == "error"]
 warnings = [f for f in report["findings"] if f["severity"] == "warning"]
 
+state, banner = st.columns([1, 4])
+with state:
+    ui.chip(status if status != "ok" else "good", {
+        "ok": "Book intact",
+        "warning": "Worth fixing",
+        "error": "Book compromised",
+    }[status])
+
+with banner:
+    if status == "error":
+        st.markdown(
+            f"**{len(errors)} problem{'s' if len(errors) != 1 else ''} corrupting "
+            f"the figures below.**"
+        )
+    elif status == "warning":
+        st.caption(f"{len(warnings)} thing{'s' if len(warnings) != 1 else ''} worth fixing.")
+
 if status == "error":
-    st.error(
-        f"**The book has {len(errors)} problem"
-        f"{'s' if len(errors) != 1 else ''} that corrupt the figures below.**"
-    )
     for finding in errors:
         st.markdown(f"- {finding['finding']}")
-elif status == "warning":
-    st.warning(f"{len(warnings)} thing{'s' if len(warnings) != 1 else ''} worth fixing.")
 
 # --- Exposure ---------------------------------------------------------------
 st.subheader("Exposure as recorded")
 
-ui.metric_row(
-    [
-        ("Open calls", exposure["open_theses"], "Positions and watch calls together"),
-        ("Positions", exposure["open_positions"], "Calls carrying dollar risk"),
-        ("Watch only", exposure["watch_only"], "No position taken"),
-        (
-            "Capital at risk",
-            ui.money(exposure["total_dollar_risk"]),
-            "Total loss if every open position stops out at once",
-        ),
-    ]
-)
+# The hero figure: the one number this view leads with. Capital at risk is it
+# — everything else on the page qualifies it.
+lead, rest = st.columns([1, 3])
+with lead:
+    ui.hero(
+        "Capital at risk",
+        ui.money(exposure["total_dollar_risk"]),
+        "if every open position stops out at once",
+    )
+with rest:
+    ui.metric_row(
+        [
+            ("Open calls", exposure["open_theses"], "Positions and watch calls together"),
+            ("Positions", exposure["open_positions"], "Calls carrying dollar risk"),
+            ("Watch only", exposure["watch_only"], "No position taken"),
+        ]
+    )
 
 ui.limitations(
     [
@@ -133,6 +150,9 @@ if book:
             "score. The scoreboard becomes meaningful after a few resolve."
         )
     else:
+        resolved = ui.guard(lambda: theses("closed")) or []
+        ui.chart(charts.cumulative_r(resolved, title="Realised R, cumulative"))
+
         ui.metric_row(
             [
                 ("Scored calls", overall["count"], None),

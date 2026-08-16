@@ -15,5 +15,12 @@ headless = true
 [browser]
 gatherUsageStats = false
 
+# Surfaces match desk_ui/theme.py. Chart contrast was validated against these
+# exact values, so changing one without the other invalidates the palette.
 [theme]
 base = "dark"
+primaryColor = "#3987e5"
+backgroundColor = "#0d0d0d"
+secondaryBackgroundColor = "#1a1a19"
+textColor = "#ffffff"
+font = "sans serif"

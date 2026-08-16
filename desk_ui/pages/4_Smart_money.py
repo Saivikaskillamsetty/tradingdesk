@@ -11,6 +11,7 @@ import streamlit as st
 
 from desk_mcp import smartmoney
 from desk_mcp.edgar import filings
+from desk_ui import charts
 from desk_ui import common as ui
 
 ui.page("Smart money", "🏛️", "Disclosed ownership, and how late each disclosure is.")
@@ -75,6 +76,13 @@ with institutions:
                 f"foreign listings."
             )
 
+            ui.chart(
+                charts.top_holdings(
+                    book["positions"],
+                    title=f"Largest positions as of {book['period']} · label is portfolio weight %",
+                )
+            )
+
             ui.table(
                 book["positions"],
                 {
@@ -100,6 +108,12 @@ with institutions:
                     f"Changes since {changes['compared_against']['period']}"
                 )
                 st.caption(changes["note"])
+
+                ui.chart(
+                    charts.position_changes(
+                        changes, title="Change in share count since the prior filing"
+                    )
+                )
 
                 opened, exited = st.columns(2)
                 with opened:

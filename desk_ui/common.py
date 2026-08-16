@@ -17,8 +17,12 @@ from __future__ import annotations
 import os
 from typing import Any, Callable
 
+import altair as alt
 import pandas as pd
 import streamlit as st
+
+from desk_ui import theme
+
 
 def read_only() -> bool:
     """Whether writes are disabled.
@@ -38,10 +42,45 @@ TTL_FAST = 300
 
 
 def page(title: str, icon: str, blurb: str) -> None:
-    """Standard page header."""
+    """Standard page header, and the app's stylesheet."""
     st.set_page_config(page_title=f"{title} — desk", page_icon=icon, layout="wide")
+    st.markdown(theme.CSS, unsafe_allow_html=True)
     st.title(title)
     st.caption(blurb)
+
+
+def chart(spec: alt.Chart | alt.LayerChart) -> None:
+    """Render a chart under the desk's own theme.
+
+    `theme=None` because Streamlit otherwise imposes its own chart styling on
+    top, which would override the validated palette with a different one.
+    """
+    st.altair_chart(spec, use_container_width=True, theme=None)
+
+
+def hero(label: str, value: str, sub: str = "") -> None:
+    """The one number a view leads with. Exactly one per page."""
+    st.markdown(
+        f"<div class='desk-hero-label'>{label}</div>"
+        f"<div class='desk-hero'>{value}</div>"
+        + (f"<div class='desk-hero-sub'>{sub}</div>" if sub else ""),
+        unsafe_allow_html=True,
+    )
+
+
+def chip(kind: str, label: str) -> None:
+    """A status chip: icon, word, then colour.
+
+    The icon and the word carry the state. Status green and status red are
+    the same colour under deutan CVD, so neither may be the only signal.
+    """
+    icon = {"good": "✓", "warning": "!", "serious": "!", "critical": "✕"}.get(kind, "•")
+    color = theme.status_color(kind)
+    st.markdown(
+        f"<span class='desk-chip' style='color:{color};border-color:{color}44;"
+        f"background:{color}14'>{icon} {label}</span>",
+        unsafe_allow_html=True,
+    )
 
 
 def is_error(payload: Any) -> bool:

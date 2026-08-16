@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import streamlit as st
 
 from desk_mcp import metrics, technicals
 from desk_mcp.edgar import facts, filings
+from desk_mcp.prices.source import default_source
+from desk_ui import charts
 from desk_ui import common as ui
 
 ui.page("Research", "🔎", "Financials from SEC filings, technicals from the tape.")
@@ -25,6 +29,14 @@ def derived(ticker: str) -> dict:
 @st.cache_data(ttl=ui.TTL_FAST)
 def technical(ticker: str) -> dict:
     return technicals.analyse(ticker)
+
+
+@st.cache_data(ttl=ui.TTL_FAST)
+def history(ticker: str, lookback_days: int = 400) -> list[dict]:
+    """Raw bars for the chart. The technical read summarises; this plots."""
+    source = default_source()
+    bars = source.daily_bars(ticker, start=date.today() - timedelta(days=lookback_days))
+    return [b.to_dict() for b in bars.bars]
 
 
 @st.cache_data(ttl=ui.TTL_SLOW)
@@ -122,6 +134,18 @@ with technical_read:
         price = read["price"]
         volatility = read["volatility"]
         momentum = read["momentum"]
+        levels = read["levels"]
+
+        bars = ui.guard(lambda: history(ticker))
+        if bars:
+            ui.chart(
+                charts.price(
+                    bars,
+                    support=[l["price"] for l in levels["nearest_support"]],
+                    resistance=[l["price"] for l in levels["nearest_resistance"]],
+                    title=f"{ticker} — daily close, with nearest levels",
+                )
+            )
 
         ui.metric_row(
             [
@@ -136,7 +160,6 @@ with technical_read:
         st.markdown(f"**Trend** — {trend.get('structure', 'unknown')}")
         st.json(trend, expanded=False)
 
-        levels = read["levels"]
         support, resistance = st.columns(2)
         with support:
             st.markdown("**Nearest support**")

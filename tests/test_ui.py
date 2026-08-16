@@ -22,6 +22,7 @@ import streamlit as st  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 from desk_mcp import cache, journal  # noqa: E402
+from desk_ui import charts  # noqa: E402
 
 UI_ROOT = pathlib.Path(__file__).resolve().parents[1] / "desk_ui"
 PAGES = [UI_ROOT / "Home.py", *sorted((UI_ROOT / "pages").glob("*.py"))]
@@ -203,6 +204,87 @@ class TestRenderedShapes:
 
         assert any("required" in e.value for e in app.error)
         assert not app.metric
+
+
+class TestCharts:
+    """Chart invariants that a rendering test cannot see.
+
+    A chart with a wrong scale or a collided label still renders, still looks
+    like a chart, and is simply misleading — so the properties that make it
+    honest are asserted directly on the spec.
+    """
+
+    def bars(self, n: int = 30, start: float = 200.0):
+        return [
+            {"date": f"2026-01-{i + 1:02d}", "close": start + i * 2.0, "volume": 1_000}
+            for i in range(n)
+        ]
+
+    def labels(self, spec) -> list:
+        return [
+            layer
+            for layer in spec.to_dict()["layer"]
+            if layer.get("mark", {}).get("type") == "text"
+        ]
+
+    def test_a_price_axis_does_not_start_at_zero(self):
+        """Anchoring price to zero spends the plot on space nobody asked about."""
+        spec = charts.price(self.bars())
+
+        domain = spec.to_dict()["layer"][0]["encoding"]["y"]["scale"]["domain"]
+
+        assert domain[0] > 100, domain
+
+    def test_the_price_domain_covers_every_level_drawn_on_it(self):
+        """A level outside the frame is a rule the reader never sees."""
+        spec = charts.price(self.bars(), support=[120.0], resistance=[400.0])
+
+        low, high = spec.to_dict()["layer"][0]["encoding"]["y"]["scale"]["domain"]
+
+        assert low <= 120.0 and high >= 400.0
+
+    def test_levels_too_close_together_get_one_label_not_two(self):
+        close = charts.price(self.bars(), support=[215.0, 216.0])
+        apart = charts.price(self.bars(), support=[205.0, 250.0])
+
+        assert len(self.labels(close)) == 1
+        assert len(self.labels(apart)) == 2
+
+    def test_every_builder_survives_empty_input(self):
+        """An empty state must say why, not raise on a page the user opened."""
+        for spec in (
+            charts.price([]),
+            charts.cumulative_r([]),
+            charts.bucket_expectancy({}),
+            charts.top_holdings([]),
+            charts.position_changes({}),
+            charts.macro_changes({}),
+        ):
+            assert spec.to_dict()
+
+    def test_unscored_calls_never_enter_the_equity_curve(self):
+        """A call with no realised R is not a flat point on the curve."""
+        spec = charts.cumulative_r(
+            [
+                {"closed_at": "2026-01-01", "ticker": "A", "outcome": {"realised_r": 2.0}},
+                {"closed_at": "2026-01-02", "ticker": "B", "outcome": {"realised_r": None}},
+            ]
+        )
+
+        # A layered chart carries several datasets; the one under test is the
+        # only one holding thesis rows.
+        datasets = spec.to_dict()["datasets"].values()
+        points = next(rows for rows in datasets if rows and "ticker" in rows[0])
+
+        assert [p["ticker"] for p in points] == ["A"]
+
+    def test_the_outcome_chart_labels_every_bar(self):
+        """Status green and red are one colour under deutan CVD."""
+        spec = charts.outcome_odds(0.3, 0.5, 0.2)
+        rendered = str(spec.to_dict())
+
+        for word in ("Target first", "Stop first", "Unresolved"):
+            assert word in rendered
 
 
 class TestMissingDataIsAGap:

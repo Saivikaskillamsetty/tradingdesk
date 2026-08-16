@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from desk_mcp import journal, postmortem
+from desk_ui import charts
 from desk_ui import common as ui
 
 ui.page(
@@ -131,6 +132,18 @@ def bucket_rows(block: dict) -> list[dict]:
         for name, stats in block.items()
     ]
 
+
+ui.chart(
+    charts.cumulative_r(
+        ui.guard(closed) or [], title="Realised R, cumulative, in resolution order"
+    )
+)
+
+left, right = st.columns(2)
+with left:
+    ui.chart(charts.bucket_expectancy(book["by_conviction"], title="Expectancy by conviction"))
+with right:
+    ui.chart(charts.bucket_expectancy(book["by_horizon"], title="Expectancy by horizon"))
 
 for label, key in (
     ("By conviction", "by_conviction"),

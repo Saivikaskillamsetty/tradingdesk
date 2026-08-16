@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from desk_mcp import forecast, macro, screener
+from desk_ui import charts
 from desk_ui import common as ui
 
 ui.page("Market", "🌐", "Macro conditions, movers, and relative strength.")
@@ -65,6 +66,9 @@ with macro_tab:
             for key, item in readings.items()
             if isinstance(item, dict)
         ]
+        ui.chart(
+            charts.macro_changes(readings, window="3m", title="Move over three months")
+        )
         ui.table(rows, empty="No macro readings returned.")
 
         stale = [
@@ -169,6 +173,14 @@ with odds_tab:
             )
             if volatility.get("spread_across_windows"):
                 st.caption(volatility["spread_note"])
+
+            ui.chart(
+                charts.expected_move(
+                    result["bootstrap_quantiles"],
+                    result["spot"],
+                    title=f"Where {ticker} could be in {horizon} trading days",
+                )
+            )
 
             st.markdown("**Where the price could be**")
             quantiles = [

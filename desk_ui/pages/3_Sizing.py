@@ -11,6 +11,7 @@ from __future__ import annotations
 import streamlit as st
 
 from desk_mcp import forecast, risk
+from desk_ui import charts
 from desk_ui import common as ui
 
 ui.page("Sizing & odds", "⚖️", "What the limits allow, and what the geometry implies.")
@@ -184,14 +185,21 @@ if target and target > 0:
         bootstrap = modelled["bootstrap"]
         breakeven = modelled["breakeven"]
 
-        ui.metric_row(
-            [
-                ("Target first", ui.pct(bootstrap["p_target_first"] * 100), None),
-                ("Stop first", ui.pct(bootstrap["p_stop_first"] * 100), None),
-                ("Unresolved", ui.pct(bootstrap["p_neither"] * 100), "Horizon expired"),
-                ("Expected", f"{bootstrap['expected_r']}R", None),
-            ]
-        )
+        odds_chart, odds_metrics = st.columns([3, 2])
+        with odds_chart:
+            ui.chart(
+                charts.outcome_odds(
+                    bootstrap["p_target_first"],
+                    bootstrap["p_stop_first"],
+                    bootstrap["p_neither"],
+                    title=f"Where this ends up within {horizon} trading days",
+                )
+            )
+        with odds_metrics:
+            ui.metric_row([("Expected", f"{bootstrap['expected_r']}R", None)])
+            ui.metric_row(
+                [("Median", f"{bootstrap['median_r']}R", "The typical outcome, not the mean")]
+            )
 
         edge = breakeven["edge_vs_breakeven"]
         needed = breakeven["win_rate_required"]
